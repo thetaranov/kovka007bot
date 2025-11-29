@@ -6,23 +6,19 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Keyboar
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from keep_alive import keep_alive
 
-# Запускаем веб-сервер для UptimeRobot
 keep_alive()
 
-# Настройка логирования
 logging.basicConfig(level=logging.INFO)
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 
 def decode_base64_url_safe(data):
     """Декодирует base64 в URL-safe формате"""
-    # Заменяем обратно - на + и _ на /
-    data = data.replace('-', '+').replace('_', '/')
-    # Добавляем padding если нужно
-    padding = 4 - (len(data) % 4)
-    if padding != 4:
-        data += '=' * padding
-    
     try:
+        data = data.replace('-', '+').replace('_', '/')
+        padding = 4 - (len(data) % 4)
+        if padding != 4:
+            data += '=' * padding
+        
         decoded_bytes = base64.b64decode(data)
         decoded_string = decoded_bytes.decode('utf-8')
         return decoded_string
@@ -33,7 +29,6 @@ def decode_base64_url_safe(data):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     
-    # Логируем что пришло
     logging.info(f"Команда /start от пользователя {user.id}")
     if context.args:
         logging.info(f"Аргументы: {context.args}")
@@ -41,22 +36,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Проверяем, есть ли параметры в команде /start (Deep Link из сайта)
     if context.args and context.args[0].startswith('order_'):
         try:
-            # Получаем закодированные данные (после 'order_')
-            order_data_encoded = context.args[0][6:]  # Убираем 'order_'
+            order_data_encoded = context.args[0][6:]
             
             logging.info(f"Получены закодированные данные: {order_data_encoded}")
             
-            # Декодируем из base64 URL-safe
             order_data_json = decode_base64_url_safe(order_data_encoded)
             
             if order_data_json:
                 order_data = json.loads(order_data_json)
                 logging.info(f"Декодированные данные заказа: {order_data}")
                 
-                # Сохраняем данные заказа
                 context.user_data['order_data'] = order_data
                 
-                # Просим номер телефона
                 keyboard = [
                     [KeyboardButton("📞 Отправить номер телефона", request_contact=True)]
                 ]
@@ -65,8 +56,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # Форматируем сообщение с данными заказа
                 dimensions = order_data.get('dims', {})
                 materials = order_data.get('mat', {})
+                colors = order_data.get('col', {})
                 
-                # Расшифровываем тип крыши для красивого отображения
+                # Расшифровываем тип крыши
                 roof_type_map = {
                     'single': 'Односкатная',
                     'gable': 'Двускатная', 
@@ -75,7 +67,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     'semiarched': 'Полуарочная'
                 }
                 
+                # Расшифровываем материалы
+                material_map = {
+                    'polycarbonate': 'Поликарбонат',
+                    'metaltile': 'Металлочерепица',
+                    'decking': 'Профнастил'
+                }
+                
                 roof_type = roof_type_map.get(order_data.get('t', ''), order_data.get('t', 'N/A'))
+                roof_material = material_map.get(materials.get('r', ''), materials.get('r', 'N/A'))
+                
+                # Берем названия цветов как есть (они уже на русском)
+                frame_color = colors.get('f', 'Не указан')
+                roof_color = colors.get('r', 'Не указан')
                 
                 message_text = (
                     f"🎉 Отлично, {user.first_name}! Ваш навес сконфигурирован!\n\n"
@@ -86,8 +90,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"• Уклон: {dimensions.get('sl', 'N/A')}°\n"
                     f"• Площадь: {order_data.get('area', 'N/A')}м²\n\n"
                     f"🧱 Материалы:\n"
-                    f"• Кровля: {materials.get('r', 'N/A')}\n"
-                    f"• Столбы: {materials.get('p', 'N/A')}\n\n"
+                    f"• Кровля: {roof_material}\n"
+                    f"• Столбы: {materials.get('p', 'N/A')}\n"
+                    f"• Цвет каркаса: {frame_color}\n"
+                    f"• Цвет кровли: {roof_color}\n\n"
                     f"💰 Предварительная стоимость: {order_data.get('pr', 0):,} руб.\n\n"
                     f"Для оформления заказа поделитесь номером телефона:"
                 )
@@ -119,17 +125,15 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
         contact = update.message.contact
         user = update.effective_user
         
-        # Проверяем, есть ли данные заказа
         order_data = context.user_data.get('order_data', {})
         
-        # Формируем сообщение для админа
         admin_message = f"🚨 НОВЫЙ ЗАКАЗ!\n\n👤 Клиент: {user.first_name}\n📞 Телефон: {contact.phone_number}\n"
         
         if order_data:
             dimensions = order_data.get('dims', {})
             materials = order_data.get('mat', {})
+            colors = order_data.get('col', {})
             
-            # Расшифровываем тип крыши
             roof_type_map = {
                 'single': 'Односкатная',
                 'gable': 'Двускатная', 
@@ -145,36 +149,31 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"📏 Размер: {dimensions.get('w', 'N/A')}×{dimensions.get('l', 'N/A')}м\n"
                 f"📏 Высота: {dimensions.get('h', 'N/A')}м\n"
                 f"🧱 Материалы: {materials.get('r', 'N/A')}, {materials.get('p', 'N/A')}\n"
+                f"🎨 Цвет каркаса: {colors.get('f', 'Не указан')}\n"
+                f"🎨 Цвет кровли: {colors.get('r', 'Не указан')}\n"
                 f"💰 Стоимость: {order_data.get('pr', 0):,} руб.\n"
                 f"🆔 ID конфигурации: {order_data.get('id', 'N/A')}\n"
             )
         else:
             admin_message += "💬 Клиент хочет обсудить конфигурацию навеса\n"
         
-        # Уведомляем админа
         try:
             await context.bot.send_message(chat_id=5216818742, text=admin_message)
         except Exception as e:
             logging.error(f"Ошибка уведомления админа: {e}")
         
-        # Ответ пользователю
         await update.message.reply_text(
             "✅ Отлично! Ваш заказ принят! 🏗️\n\n"
-            "В ближайшее время с вами свяжется менеджер для уточнения деталей "
-            "и согласования окончательной стоимости.\n\n"
+            "В ближайшее время с вами свяжется менеджер для уточнения деталей.\n\n"
             "Спасибо, что выбрали нас!",
             reply_markup=ReplyKeyboardMarkup([[]], resize_keyboard=True)
         )
         
-        # Очищаем данные заказа
         if 'order_data' in context.user_data:
             del context.user_data['order_data']
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка обычных сообщений"""
-    await update.message.reply_text(
-        "Нажмите /start чтобы начать работу с ботом."
-    )
+    await update.message.reply_text("Нажмите /start чтобы начать работу с ботом.")
 
 def main():
     application = Application.builder().token(BOT_TOKEN).build()
