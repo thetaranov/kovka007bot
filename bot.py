@@ -33,16 +33,25 @@ def decode_base64_url_safe(data):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     
+    # Логируем что пришло
+    logging.info(f"Команда /start от пользователя {user.id}")
+    if context.args:
+        logging.info(f"Аргументы: {context.args}")
+    
     # Проверяем, есть ли параметры в команде /start (Deep Link из сайта)
     if context.args and context.args[0].startswith('order_'):
         try:
             # Получаем закодированные данные (после 'order_')
             order_data_encoded = context.args[0][6:]  # Убираем 'order_'
             
+            logging.info(f"Получены закодированные данные: {order_data_encoded}")
+            
             # Декодируем из base64 URL-safe
             order_data_json = decode_base64_url_safe(order_data_encoded)
+            
             if order_data_json:
                 order_data = json.loads(order_data_json)
+                logging.info(f"Декодированные данные заказа: {order_data}")
                 
                 # Сохраняем данные заказа
                 context.user_data['order_data'] = order_data
@@ -56,11 +65,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # Форматируем сообщение с данными заказа
                 dimensions = order_data.get('dims', {})
                 materials = order_data.get('mat', {})
-                options = order_data.get('opt', {})
+                
+                # Расшифровываем тип крыши для красивого отображения
+                roof_type_map = {
+                    'single': 'Односкатная',
+                    'gable': 'Двускатная', 
+                    'arched': 'Арочная',
+                    'triangular': 'Треугольная',
+                    'semiarched': 'Полуарочная'
+                }
+                
+                roof_type = roof_type_map.get(order_data.get('t', ''), order_data.get('t', 'N/A'))
                 
                 message_text = (
                     f"🎉 Отлично, {user.first_name}! Ваш навес сконфигурирован!\n\n"
                     f"📐 Параметры навеса:\n"
+                    f"• Тип: {roof_type}\n"
                     f"• Размер: {dimensions.get('w', 'N/A')}×{dimensions.get('l', 'N/A')}м\n"
                     f"• Высота: {dimensions.get('h', 'N/A')}м\n"
                     f"• Уклон: {dimensions.get('sl', 'N/A')}°\n"
@@ -109,8 +129,21 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
             dimensions = order_data.get('dims', {})
             materials = order_data.get('mat', {})
             
+            # Расшифровываем тип крыши
+            roof_type_map = {
+                'single': 'Односкатная',
+                'gable': 'Двускатная', 
+                'arched': 'Арочная',
+                'triangular': 'Треугольная',
+                'semiarched': 'Полуарочная'
+            }
+            
+            roof_type = roof_type_map.get(order_data.get('t', ''), order_data.get('t', 'N/A'))
+            
             admin_message += (
-                f"📐 Размер: {dimensions.get('w', 'N/A')}×{dimensions.get('l', 'N/A')}м\n"
+                f"📐 Тип: {roof_type}\n"
+                f"📏 Размер: {dimensions.get('w', 'N/A')}×{dimensions.get('l', 'N/A')}м\n"
+                f"📏 Высота: {dimensions.get('h', 'N/A')}м\n"
                 f"🧱 Материалы: {materials.get('r', 'N/A')}, {materials.get('p', 'N/A')}\n"
                 f"💰 Стоимость: {order_data.get('pr', 0):,} руб.\n"
                 f"🆔 ID конфигурации: {order_data.get('id', 'N/A')}\n"
