@@ -2,9 +2,8 @@ import os
 import logging
 import json
 import base64
-import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 from keep_alive import keep_alive
 
 keep_alive()
@@ -12,10 +11,9 @@ keep_alive()
 # Настройка подробного логирования
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.DEBUG,  # Изменили на DEBUG для максимальной информации
+    level=logging.DEBUG,
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler('bot_debug.log', encoding='utf-8')
     ])
 logger = logging.getLogger(__name__)
 
@@ -23,12 +21,9 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 logger.info(f"🔍 Проверяем токен бота...")
 logger.info(f"Токен существует: {BOT_TOKEN is not None}")
-logger.info(f"Длина токена: {len(BOT_TOKEN) if BOT_TOKEN else 0}")
 
 if not BOT_TOKEN:
     logger.error("❌ КРИТИЧЕСКАЯ ОШИБКА: BOT_TOKEN не установлен!")
-    logger.error(
-        "Добавьте BOT_TOKEN в Secrets (ключ-замок в боковой панели Replit)")
     exit(1)
 
 
@@ -36,9 +31,6 @@ def decode_base64_url_safe(data):
     """Декодирует base64 в URL-safe формате"""
     try:
         logger.info(f"🔧 Декодируем base64 данные, длина: {len(data)}")
-        # Добавляем отладочную информацию
-        logger.debug(f"Первые 50 символов данных: {data[:50]}")
-
         data = data.replace('-', '+').replace('_', '/')
         padding = 4 - (len(data) % 4)
         if padding != 4:
@@ -47,14 +39,13 @@ def decode_base64_url_safe(data):
         decoded_bytes = base64.b64decode(data)
         decoded_string = decoded_bytes.decode('utf-8')
         logger.info(f"✅ Данные успешно декодированы")
-        logger.debug(f"Декодированная строка: {decoded_string}")
         return decoded_string
     except Exception as e:
         logger.error(f"❌ Ошибка декодирования base64: {e}", exc_info=True)
         return None
 
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def start(update: Update, context: CallbackContext):
     """Обработчик команды /start"""
     try:
         user = update.effective_user
@@ -64,33 +55,30 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info("🚀 ВЫЗВАНА КОМАНДА /start")
         logger.info(f"👤 Пользователь: ID={user.id}, Имя='{user.first_name}'")
         logger.info(f"📝 Текст сообщения: '{message.text}'")
-        logger.info(f"🆔 Chat ID: {message.chat_id}")
-        logger.info(f"📅 Дата: {message.date}")
 
         if context.args:
             logger.info(f"📦 Аргументы команды: {context.args}")
             logger.info(f"📦 Количество аргументов: {len(context.args)}")
-            logger.info(f"📦 Первый аргумент: '{context.args[0]}'")
 
             # Проверяем, есть ли заказ
             if context.args[0].startswith('order_'):
                 logger.info("🎯 Обнаружен заказ в аргументах!")
-                await process_order(update, context, context.args[0][6:])
+                process_order(update, context, context.args[0][6:])
                 return
         else:
             logger.info("📭 Аргументов команды нет")
 
         # Обычное приветствие (без заказа)
-        await send_welcome_message(update, user)
+        send_welcome_message(update, user)
 
     except Exception as e:
         logger.error(f"❌ Ошибка в обработчике start: {e}", exc_info=True)
-        await update.message.reply_text(
+        update.message.reply_text(
             "❌ Произошла ошибка. Пожалуйста, попробуйте еще раз.")
 
 
-async def process_order(update: Update, context: ContextTypes.DEFAULT_TYPE,
-                        order_data_encoded: str):
+def process_order(update: Update, context: CallbackContext,
+                  order_data_encoded: str):
     """Обрабатывает данные заказа"""
     try:
         logger.info(
@@ -100,8 +88,7 @@ async def process_order(update: Update, context: ContextTypes.DEFAULT_TYPE,
 
         if not order_data_json:
             logger.error("❌ Не удалось декодировать данные заказа")
-            await update.message.reply_text(
-                "❌ Ошибка при обработке данных заказа.")
+            update.message.reply_text("❌ Ошибка при обработке данных заказа.")
             return
 
         logger.info(f"📋 Парсим JSON данные...")
@@ -112,21 +99,20 @@ async def process_order(update: Update, context: ContextTypes.DEFAULT_TYPE,
         logger.info("💾 Данные заказа сохранены в user_data")
 
         # Отправляем сообщение с деталями заказа
-        await send_order_details(update, context, order_data)
+        send_order_details(update, context, order_data)
 
     except json.JSONDecodeError as e:
         logger.error(f"❌ Ошибка парсинга JSON: {e}")
-        await update.message.reply_text("❌ Ошибка в формате данных заказа.")
+        update.message.reply_text("❌ Ошибка в формате данных заказа.")
     except Exception as e:
         logger.error(f"❌ Неожиданная ошибка обработки заказа: {e}",
                      exc_info=True)
-        await update.message.reply_text(
+        update.message.reply_text(
             "❌ Произошла непредвиденная ошибка при обработке заказа.")
 
 
-async def send_order_details(update: Update,
-                             context: ContextTypes.DEFAULT_TYPE,
-                             order_data: dict):
+def send_order_details(update: Update, context: CallbackContext,
+                       order_data: dict):
     """Отправляет детали заказа и запрашивает контакт"""
     try:
         user = update.effective_user
@@ -202,17 +188,16 @@ async def send_order_details(update: Update,
                                            resize_keyboard=True,
                                            one_time_keyboard=True)
 
-        await update.message.reply_text(message_text,
-                                        reply_markup=reply_markup)
+        update.message.reply_text(message_text, reply_markup=reply_markup)
         logger.info("✅ Сообщение с деталями заказа отправлено пользователю")
 
     except Exception as e:
         logger.error(f"❌ Ошибка при отправке деталей заказа: {e}",
                      exc_info=True)
-        await update.message.reply_text("❌ Ошибка при формировании заказа.")
+        update.message.reply_text("❌ Ошибка при формировании заказа.")
 
 
-async def send_welcome_message(update: Update, user):
+def send_welcome_message(update: Update, user):
     """Отправляет приветственное сообщение"""
     try:
         logger.info("📝 Отправляем приветственное сообщение")
@@ -235,15 +220,14 @@ async def send_welcome_message(update: Update, user):
                         "• 📞 Оформить заказ\n\n"
                         "Нажмите кнопку ниже чтобы начать создание навеса:")
 
-        await update.message.reply_text(welcome_text,
-                                        reply_markup=reply_markup)
+        update.message.reply_text(welcome_text, reply_markup=reply_markup)
         logger.info("✅ Приветственное сообщение отправлено")
 
     except Exception as e:
         logger.error(f"❌ Ошибка при отправке приветствия: {e}", exc_info=True)
 
 
-async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def handle_contact(update: Update, context: CallbackContext):
     """Обрабатывает отправку контакта"""
     try:
         user = update.effective_user
@@ -257,10 +241,10 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
         order_data = context.user_data.get('order_data', {})
 
         # Отправляем уведомление админу
-        await send_admin_notification(context, user, contact, order_data)
+        send_admin_notification(context, user, contact, order_data)
 
         # Отправляем подтверждение пользователю
-        await update.message.reply_text(
+        update.message.reply_text(
             "✅ Отлично! Ваш заказ принят! 🏗️\n\n"
             "В ближайшее время с вами свяжется наш менеджер для уточнения деталей.\n\n"
             "Спасибо, что выбрали Ковка007! 💙",
@@ -276,11 +260,11 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         logger.error(f"❌ Ошибка обработки контакта: {e}", exc_info=True)
-        await update.message.reply_text("❌ Ошибка при обработке контакта.")
+        update.message.reply_text("❌ Ошибка при обработке контакта.")
 
 
-async def send_admin_notification(context: ContextTypes.DEFAULT_TYPE, user,
-                                  contact, order_data: dict):
+def send_admin_notification(context: CallbackContext, user, contact,
+                            order_data: dict):
     """Отправляет уведомление админу"""
     try:
         ADMIN_CHAT_ID = 5216818742  # Замените на ваш chat_id
@@ -351,8 +335,7 @@ async def send_admin_notification(context: ContextTypes.DEFAULT_TYPE, user,
             logger.info(
                 "📤 Отправляем уведомление админу о запросе на консультацию")
 
-        await context.bot.send_message(chat_id=ADMIN_CHAT_ID,
-                                       text=admin_message)
+        context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=admin_message)
         logger.info(
             f"✅ Уведомление отправлено админу (chat_id: {ADMIN_CHAT_ID})")
 
@@ -360,7 +343,7 @@ async def send_admin_notification(context: ContextTypes.DEFAULT_TYPE, user,
         logger.error(f"❌ Ошибка отправки уведомления админу: {e}")
 
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def handle_message(update: Update, context: CallbackContext):
     """Обрабатывает текстовые сообщения"""
     try:
         user = update.effective_user
@@ -378,11 +361,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                                resize_keyboard=True,
                                                one_time_keyboard=True)
 
-            await update.message.reply_text(
+            update.message.reply_text(
                 "Для оформления заказа нажмите кнопку ниже чтобы поделиться номером телефона:",
                 reply_markup=reply_markup)
         else:
-            await update.message.reply_text(
+            update.message.reply_text(
                 "Нажмите /start чтобы начать работу с ботом или создать заказ на навес."
             )
 
@@ -390,13 +373,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"❌ Ошибка обработки сообщения: {e}", exc_info=True)
 
 
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def error_handler(update: Update, context: CallbackContext):
     """Обработчик ошибок"""
     logger.error(f"🔥 Ошибка в боте: {context.error}", exc_info=True)
 
     if update and update.effective_user:
         try:
-            await update.effective_message.reply_text(
+            update.effective_message.reply_text(
                 "❌ Произошла непредвиденная ошибка. Пожалуйста, попробуйте еще раз или свяжитесь с менеджером: @thetaranov"
             )
         except Exception as e:
@@ -409,25 +392,29 @@ def main():
         logger.info("🤖 ЗАПУСКАЕМ БОТА...")
         logger.info(f"🔑 Токен: {BOT_TOKEN[:10]}...{BOT_TOKEN[-10:]}")
 
-        # Создаем приложение
-        application = Application.builder().token(BOT_TOKEN).build()
+        # Создаем updater вместо application
+        updater = Updater(BOT_TOKEN, use_context=True)
+
+        # Получаем dispatcher для регистрации обработчиков
+        dp = updater.dispatcher
 
         # Добавляем обработчики
-        application.add_handler(CommandHandler("start", start))
-        application.add_handler(MessageHandler(filters.CONTACT,
-                                               handle_contact))
-        application.add_handler(
-            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+        dp.add_handler(CommandHandler("start", start))
+        dp.add_handler(MessageHandler(Filters.contact, handle_contact))
+        dp.add_handler(
+            MessageHandler(Filters.text & ~Filters.command, handle_message))
 
         # Обработчик ошибок
-        application.add_error_handler(error_handler)
+        dp.add_error_handler(error_handler)
 
         logger.info("🔄 Запускаем polling...")
 
         # Запускаем бота
-        application.run_polling(poll_interval=1.0,
-                                timeout=10,
-                                drop_pending_updates=True)
+        updater.start_polling()
+        logger.info("✅ Бот запущен и ожидает сообщений...")
+
+        # Бот работает до принудительной остановки
+        updater.idle()
 
     except Exception as e:
         logger.error(f"💥 КРИТИЧЕСКАЯ ОШИБКА ПРИ ЗАПУСКЕ БОТА: {e}",
