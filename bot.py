@@ -1,135 +1,125 @@
 import os
 import logging
 import json
-from flask import Flask
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from keep_alive import keep_alive
+
+# Запускаем веб-сервер для UptimeRobot
+keep_alive()
 
 # Настройка логирования
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-
-# Конфигурация
+logging.basicConfig(level=logging.INFO)
 BOT_TOKEN = os.getenv('BOT_TOKEN')
-ADMIN_IDS = json.loads(os.getenv('ADMIN_IDS', '[5216818742]'))
 
-# Хранилище заказов в памяти (для простоты)
-orders = []
-
-def start(update: Update, context: CallbackContext):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     
+    # Создаем кнопку с WebApp
     keyboard = [
-        [InlineKeyboardButton("🏗️ Создать навес", url="https://kovka007.vercel.app")],
+        [InlineKeyboardButton(
+            "🏗️ Создать навес", 
+            web_app=WebAppInfo(url="https://kovka007.vercel.app")
+        )],
         [InlineKeyboardButton("📞 Связаться с менеджером", url="https://t.me/thetaranov")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    update.message.reply_text(
+    await update.message.reply_text(
         f"Привет, {user.first_name}! 👋\n\n"
-        "Я ваш помощник в создании идеального навеса. "
-        "Нажмите кнопку ниже, чтобы перейти в конструктор:",
+        "Я бот для заказов навесов. Нажмите кнопку ниже чтобы создать навес в конструкторе:",
         reply_markup=reply_markup
     )
 
-def handle_contact(update: Update, context: CallbackContext):
+async def handle_web_app_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обрабатываем данные из WebApp"""
+    try:
+        # Получаем данные из WebApp
+        web_app_data = update.effective_message.web_app_data
+        data = json.loads(web_app_data.data)
+        
+        logging.info(f"Получены данные из WebApp: {data}")
+        
+        # Сохраняем данные заказа
+        context.user_data['order_data'] = data
+        
+        # Просим номер телефона
+        from telegram import KeyboardButton, ReplyKeyboardMarkup
+        
+        keyboard = [
+            [KeyboardButton("📞 Отправить номер телефона", request_contact=True)]
+        ]
+        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
+        
+        await update.message.reply_text(
+            f"🎉 Отлично! Ваш навес сконфигурирован!\n\n"
+            f"📐 Параметры:\n"
+            f"• Размеры: {data.get('dimensions', 'не указаны')}\n"
+            f"• Материалы: {data.get('materials', 'не указаны')}\n"
+            f"• Стоимость: {data.get('cost', 0)} руб.\n\n"
+            f"Для оформления заказа поделитесь номером телефона:",
+            reply_markup=reply_markup
+        )
+        
+    except Exception as e:
+        logging.error(f"Ошибка обработки WebApp данных: {e}")
+        await update.message.reply_text("❌ Произошла ошибка при обработке заказа")
+
+async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.contact:
         contact = update.message.contact
         user = update.effective_user
         
-        # Сохраняем заказ
-        order_data = {
-            'user_id': user.id,
-            'user_name': f"{user.first_name} {user.last_name or ''}".strip(),
-            'phone': contact.phone_number,
-            'timestamp': str(update.message.date)
-        }
-        orders.append(order_data)
+        # Получаем данные заказа
+        order_data = context.user_data.get('order_data', {})
         
-        # Уведомление клиента
-        update.message.reply_text(
-            "✅ Отлично! Ваши контактные данные сохранены!\n\n"
-            "В ближайшее время с вами свяжется менеджер "
-            "для консультации по вашему навесу.\n\n"
-            "Спасибо, что выбрали нас! 🏗️",
+        # Формируем сообщение для админа
+        admin_message = (
+            f"🚨 НОВЫЙ ЗАКАЗ!\n\n"
+            f"👤 Клиент: {user.first_name}\n"
+            f"📞 Телефон: {contact.phone_number}\n"
+        )
+        
+        if order_data:
+            admin_message += (
+                f"📐 Размеры: {order_data.get('dimensions', 'не указаны')}\n"
+                f"🧱 Материалы: {order_data.get('materials', 'не указаны')}\n"
+                f"💰 Стоимость: {order_data.get('cost', 0)} руб.\n"
+            )
+        
+        # Уведомляем админа
+        await context.bot.send_message(chat_id=5216818742, text=admin_message)
+        
+        # Ответ пользователю
+        from telegram import ReplyKeyboardMarkup
+        
+        await update.message.reply_text(
+            "✅ Отлично! Ваш заказ принят! 🏗️\n\n"
+            "В ближайшее время с вами свяжется менеджер для уточнения деталей.\n\n"
+            "Спасибо, что выбрали нас!",
             reply_markup=ReplyKeyboardMarkup([[]], resize_keyboard=True)
         )
         
-        # Уведомление админов
-        admin_message = (
-            f"🚨 НОВЫЙ КОНТАКТ!\n\n"
-            f"👤 Клиент: {user.first_name}\n"
-            f"📞 Телефон: {contact.phone_number}\n"
-            f"⏰ Время: {update.message.date.strftime('%H:%M %d.%m.%Y')}\n"
-            f"Всего заказов: {len(orders)}"
-        )
-        
-        for admin_id in ADMIN_IDS:
-            try:
-                context.bot.send_message(
-                    chat_id=admin_id,
-                    text=admin_message
-                )
-            except Exception as e:
-                logging.error(f"Ошибка уведомления админа {admin_id}: {e}")
-    else:
-        update.message.reply_text("Пожалуйста, сначала создайте навес в конструкторе.")
+        # Очищаем данные заказа
+        if 'order_data' in context.user_data:
+            del context.user_data['order_data']
 
-def admin_command(update: Update, context: CallbackContext):
-    """Команда для админов"""
-    user_id = update.effective_user.id
-    if user_id not in ADMIN_IDS:
-        update.message.reply_text("❌ У вас нет доступа к этой команде")
-        return
-    
-    update.message.reply_text(
-        f"📊 Панель администратора\n\n"
-        f"• 📦 Всего заказов: {len(orders)}\n\n"
-        f"Используйте конструктор: https://kovka007.vercel.app"
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка обычных сообщений"""
+    await update.message.reply_text(
+        "Нажмите /start чтобы начать работу с ботом."
     )
-
-def handle_message(update: Update, context: CallbackContext):
-    """Обработка текстовых сообщений"""
-    update.message.reply_text(
-        "Используйте команду /start для начала работы."
-    )
-
-# Flask app для здоровья
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "🤖 Бот для заказов навесов работает!"
-
-@app.route('/health')
-def health():
-    return {"status": "ok", "orders_count": len(orders)}
 
 def main():
-    if not BOT_TOKEN:
-        logging.error("❌ BOT_TOKEN не установлен!")
-        return
+    application = Application.builder().token(BOT_TOKEN).build()
     
-    # Создаем updater и dispatcher
-    updater = Updater(BOT_TOKEN, use_context=True)
-    dispatcher = updater.dispatcher
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.CONTACT, handle_contact))
+    application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_web_app_data))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    # Добавляем обработчики
-    dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(CommandHandler("admin", admin_command))
-    dispatcher.add_handler(MessageHandler(Filters.contact, handle_contact))
-    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
-    
-    # Запускаем Flask в отдельном потоке
-    from threading import Thread
-    Thread(target=lambda: app.run(host='0.0.0.0', port=int(os.getenv('PORT', 10000))), daemon=True).start()
-    
-    # Запускаем бота
-    logging.info("🚀 Бот запускается...")
-    updater.start_polling()
-    updater.idle()
+    print("🤖 Бот запущен!")
+    application.run_polling()
 
 if __name__ == '__main__':
     main()
