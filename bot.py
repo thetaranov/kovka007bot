@@ -2,14 +2,25 @@ import os
 import logging
 import json
 import base64
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from keep_alive import keep_alive
+from flask import Flask, request
+import threading
 
-keep_alive()
+# Настройка логирования
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 
-logging.basicConfig(level=logging.INFO)
 BOT_TOKEN = os.getenv('BOT_TOKEN')
+if not BOT_TOKEN:
+    logging.error("❌ BOT_TOKEN не установлен!")
+    exit(1)
+
+# Создаем приложение бота
+application = Application.builder().token(BOT_TOKEN).build()
 
 def decode_base64_url_safe(data):
     """Декодирует base64 в URL-safe формате"""
@@ -25,6 +36,64 @@ def decode_base64_url_safe(data):
     except Exception as e:
         logging.error(f"Ошибка декодирования base64: {e}")
         return None
+
+async def process_order(update: Update, context: ContextTypes.DEFAULT_TYPE, order_data: dict):
+    """Обработка данных заказа"""
+    # Сохраняем данные заказа
+    context.user_data['order_data'] = order_data
+    
+    # Просим номер телефона
+    keyboard = [
+        [KeyboardButton("📞 Отправить номер телефона", request_contact=True)]
+    ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
+    
+    # Форматируем сообщение с данными заказа
+    dimensions = order_data.get('dims', {})
+    materials = order_data.get('mat', {})
+    colors = order_data.get('col', {})
+    
+    # Расшифровываем тип крыши
+    roof_type_map = {
+        'single': 'Односкатная',
+        'gable': 'Двускатная', 
+        'arched': 'Арочная',
+        'triangular': 'Треугольная',
+        'semiarched': 'Полуарочная'
+    }
+    
+    # Расшифровываем материалы
+    material_map = {
+        'polycarbonate': 'Поликарбонат',
+        'metaltile': 'Металлочерепица',
+        'decking': 'Профнастил'
+    }
+    
+    roof_type = roof_type_map.get(order_data.get('t', ''), order_data.get('t', 'N/A'))
+    roof_material = material_map.get(materials.get('r', ''), materials.get('r', 'N/A'))
+    
+    # Берем названия цветов как есть (они уже на русском)
+    frame_color = colors.get('f', 'Не указан')
+    roof_color = colors.get('r', 'Не указан')
+    
+    message_text = (
+        f"🎉 Отлично, {update.effective_user.first_name}! Ваш навес сконфигурирован!\n\n"
+        f"📐 Параметры навеса:\n"
+        f"• Тип: {roof_type}\n"
+        f"• Размер: {dimensions.get('w', 'N/A')}×{dimensions.get('l', 'N/A')}м\n"
+        f"• Высота: {dimensions.get('h', 'N/A')}м\n"
+        f"• Уклон: {dimensions.get('sl', 'N/A')}°\n"
+        f"• Площадь: {order_data.get('area', 'N/A')}м²\n\n"
+        f"🧱 Материалы:\n"
+        f"• Кровля: {roof_material}\n"
+        f"• Столбы: {materials.get('p', 'N/A')}\n"
+        f"• Цвет каркаса: {frame_color}\n"
+        f"• Цвет кровли: {roof_color}\n\n"
+        f"💰 Предварительная стоимость: {order_data.get('pr', 0):,} руб.\n\n"
+        f"Для оформления заказа поделитесь номером телефона:"
+    )
+    
+    await update.message.reply_text(message_text, reply_markup=reply_markup)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -46,59 +115,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 order_data = json.loads(order_data_json)
                 logging.info(f"Декодированные данные заказа: {order_data}")
                 
-                context.user_data['order_data'] = order_data
-                
-                keyboard = [
-                    [KeyboardButton("📞 Отправить номер телефона", request_contact=True)]
-                ]
-                reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
-                
-                # Форматируем сообщение с данными заказа
-                dimensions = order_data.get('dims', {})
-                materials = order_data.get('mat', {})
-                colors = order_data.get('col', {})
-                
-                # Расшифровываем тип крыши
-                roof_type_map = {
-                    'single': 'Односкатная',
-                    'gable': 'Двускатная', 
-                    'arched': 'Арочная',
-                    'triangular': 'Треугольная',
-                    'semiarched': 'Полуарочная'
-                }
-                
-                # Расшифровываем материалы
-                material_map = {
-                    'polycarbonate': 'Поликарбонат',
-                    'metaltile': 'Металлочерепица',
-                    'decking': 'Профнастил'
-                }
-                
-                roof_type = roof_type_map.get(order_data.get('t', ''), order_data.get('t', 'N/A'))
-                roof_material = material_map.get(materials.get('r', ''), materials.get('r', 'N/A'))
-                
-                # Берем названия цветов как есть (они уже на русском)
-                frame_color = colors.get('f', 'Не указан')
-                roof_color = colors.get('r', 'Не указан')
-                
-                message_text = (
-                    f"🎉 Отлично, {user.first_name}! Ваш навес сконфигурирован!\n\n"
-                    f"📐 Параметры навеса:\n"
-                    f"• Тип: {roof_type}\n"
-                    f"• Размер: {dimensions.get('w', 'N/A')}×{dimensions.get('l', 'N/A')}м\n"
-                    f"• Высота: {dimensions.get('h', 'N/A')}м\n"
-                    f"• Уклон: {dimensions.get('sl', 'N/A')}°\n"
-                    f"• Площадь: {order_data.get('area', 'N/A')}м²\n\n"
-                    f"🧱 Материалы:\n"
-                    f"• Кровля: {roof_material}\n"
-                    f"• Столбы: {materials.get('p', 'N/A')}\n"
-                    f"• Цвет каркаса: {frame_color}\n"
-                    f"• Цвет кровли: {roof_color}\n\n"
-                    f"💰 Предварительная стоимость: {order_data.get('pr', 0):,} руб.\n\n"
-                    f"Для оформления заказа поделитесь номером телефона:"
-                )
-                
-                await update.message.reply_text(message_text, reply_markup=reply_markup)
+                await process_order(update, context, order_data)
                 return
             else:
                 await update.message.reply_text("❌ Ошибка при обработке данных заказа")
@@ -175,15 +192,56 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Нажмите /start чтобы начать работу с ботом.")
 
+# Добавляем обработчики
+application.add_handler(CommandHandler("start", start))
+application.add_handler(MessageHandler(filters.CONTACT, handle_contact))
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+# Flask app для здоровья
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "🤖 Бот для навесов работает!"
+
+@app.route('/health')
+def health():
+    return {"status": "ok", "service": "canopy-bot"}
+
+def run_flask():
+    """Запуск Flask сервера"""
+    port = int(os.getenv('PORT', 10000))
+    app.run(host='0.0.0.0', port=port)
+
+def run_bot():
+    """Запуск бота в отдельном потоке"""
+    logging.info("🚀 Запускаем бота...")
+    try:
+        # Используем polling с настройками для Replit
+        application.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            timeout=30,
+            connect_timeout=30,
+            pool_timeout=30
+        )
+    except Exception as e:
+        logging.error(f"Ошибка запуска бота: {e}")
+        # Перезапуск через 5 секунд
+        import time
+        time.sleep(5)
+        run_bot()
+
 def main():
-    application = Application.builder().token(BOT_TOKEN).build()
+    """Главная функция"""
+    logging.info("=== ЗАПУСК ПРИЛОЖЕНИЯ ===")
     
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.CONTACT, handle_contact))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    # Запускаем Flask в отдельном потоке
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    logging.info("🌐 Flask сервер запущен")
     
-    print("🤖 Бот запущен!")
-    application.run_polling()
+    # Запускаем бота в основном потоке
+    run_bot()
 
 if __name__ == '__main__':
     main()
