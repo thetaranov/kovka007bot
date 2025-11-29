@@ -2,11 +2,10 @@ import os
 import logging
 import json
 import sqlite3
-import asyncio
 from threading import Thread
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, WebAppInfo
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackContext, filters
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
 # Настройка логирования
 logging.basicConfig(
@@ -66,7 +65,7 @@ def save_order(telegram_id, customer_name, customer_phone, config_data):
         return None
 
 # Обработчики команд бота
-async def start(update: Update, context: CallbackContext):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     
     # Проверяем, пришел ли заказ из конструктора
@@ -106,7 +105,7 @@ async def start(update: Update, context: CallbackContext):
         reply_markup=reply_markup
     )
 
-async def handle_contact(update: Update, context: CallbackContext):
+async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.contact and 'pending_order' in context.user_data:
         contact = update.message.contact
         user = update.effective_user
@@ -153,7 +152,7 @@ async def handle_contact(update: Update, context: CallbackContext):
     else:
         await update.message.reply_text("Пожалуйста, сначала создайте навес в конструкторе.")
 
-async def admin_command(update: Update, context: CallbackContext):
+async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда для админов"""
     user_id = update.effective_user.id
     if user_id not in ADMIN_IDS:
@@ -180,7 +179,7 @@ async def admin_command(update: Update, context: CallbackContext):
         logging.error(f"Ошибка БД в admin_command: {e}")
         await update.message.reply_text("❌ Ошибка доступа к базе данных")
 
-async def handle_message(update: Update, context: CallbackContext):
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка текстовых сообщений"""
     await update.message.reply_text(
         "Используйте команду /start для начала работы."
@@ -202,14 +201,16 @@ def run_flask():
     port = int(os.getenv('PORT', 10000))
     app.run(host='0.0.0.0', port=port)
 
-async def run_bot():
-    """Запуск Telegram бота"""
-    logging.info("🚀 Инициализация бота...")
-    
+def main():
+    """Главная функция"""
+    if not BOT_TOKEN:
+        logging.error("❌ BOT_TOKEN не установлен!")
+        return
+
     # Инициализируем базу данных
     init_db()
-    
-    # Создаем приложение бота
+
+    # Создаем приложение бота с использованием современного API
     application = Application.builder().token(BOT_TOKEN).build()
     
     # Добавляем обработчики
@@ -218,24 +219,14 @@ async def run_bot():
     application.add_handler(MessageHandler(filters.CONTACT, handle_contact))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    logging.info("✅ Бот запущен и готов к работе!")
-    
-    # Запускаем polling
-    await application.run_polling()
-
-def main():
-    """Главная функция"""
-    if not BOT_TOKEN:
-        logging.error("❌ BOT_TOKEN не установлен!")
-        return
-    
     # Запускаем Flask в отдельном потоке
     flask_thread = Thread(target=run_flask, daemon=True)
     flask_thread.start()
     logging.info("🌐 Flask сервер запущен")
-    
-    # Запускаем бота
-    asyncio.run(run_bot())
+
+    # Запускаем бота (используем правильный метод)
+    logging.info("🚀 Бот запускается...")
+    application.run_polling()
 
 if __name__ == '__main__':
     main()
