@@ -16,14 +16,12 @@ logger = logging.getLogger(__name__)
 
 # КОНФИГУРАЦИЯ
 BOT_TOKEN = os.getenv('BOT_TOKEN')
-ADMIN_CHANNEL_ID = -1003250531931  # Куда летят заявки
-INFO_CHANNEL_ID = -1003461235309   # Обязательный канал (бот должен быть админом!)
-INFO_CHANNEL_LINK = "https://t.me/taranov_public" # Публичная ссылка
-
+ADMIN_CHANNEL_ID = -1003250531931
+INFO_CHANNEL_ID = -1003461235309
+INFO_CHANNEL_LINK = "https://t.me/taranov_public"
 ADMIN_IDS = [7746957973] 
 
-if not BOT_TOKEN:
-    exit(1)
+if not BOT_TOKEN: exit(1)
 
 ROOF_TYPES = {'single': 'Односкатный', 'gable': 'Двускатный', 'arched': 'Арочный', 'triangular': 'Треугольный', 'semiarched': 'Полуарочный'}
 MATERIALS = {'polycarbonate': 'Сотовый поликарбонат', 'metaltile': 'Металлочерепица', 'decking': 'Профнастил'}
@@ -32,122 +30,113 @@ PAINTS = {'none': 'Грунт-эмаль', 'ral': 'Эмаль RAL', 'polymer': '
 # === ПРОВЕРКА ПОДПИСКИ ===
 async def check_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    # Админов пускаем всегда
+    if user_id in ADMIN_IDS: return True
+    
     try:
         member = await context.bot.get_chat_member(chat_id=INFO_CHANNEL_ID, user_id=user_id)
-        
-        # Логируем статус для отладки
-        logger.info(f"Статус подписки user {user_id}: {member.status}")
-        
-        # Разрешенные статусы: creator (владелец), administrator (админ), member (подписчик)
         if member.status in ['left', 'kicked', 'restricted']:
             return False
         return True
-        
     except Exception as e:
-        logger.error(f"⚠️ Ошибка проверки подписки: {e}")
-        logger.error("Убедитесь, что бот является АДМИНИСТРАТОРОМ в канале " + str(INFO_CHANNEL_ID))
-        # В случае ошибки API лучше пустить пользователя, чем заблокировать навсегда
+        logger.warning(f"Ошибка подписки: {e}")
         return True
 
 async def ask_subscription(update: Update):
-    """Показывает плашку подписки"""
     kb = [
         [InlineKeyboardButton("📢 Подписаться на канал", url=INFO_CHANNEL_LINK)],
         [InlineKeyboardButton("✅ Я подписался", callback_data="check_sub")]
     ]
-    
-    msg_text = (
-        "🚫 <b>Доступ ограничен!</b>\n\n"
-        "Чтобы пользоваться конструктором и ботом, пожалуйста, подпишитесь на наш канал.\n"
-        "Там много полезного про навесы и стройку!"
+    await update.message.reply_text(
+        "🚫 <b>Доступ ограничен!</b>\n\nПодпишитесь на канал, чтобы пользоваться ботом.",
+        reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.HTML
     )
-    
-    # Отправляем сообщение или редактируем старое (если это callback)
-    if update.callback_query:
-        await update.callback_query.message.edit_text(msg_text, reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.HTML)
-    else:
-        await update.message.reply_text(msg_text, reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.HTML)
 
-# === ОБРАБОТЧИКИ ===
+# === МЕНЮ И КНОПКИ ===
+async def get_main_keyboard():
+    web_app_url = "https://kovka007.vercel.app"
+    return ReplyKeyboardMarkup([
+        [KeyboardButton("🏗 Открыть конструктор", web_app=WebAppInfo(url=web_app_url))],
+        [KeyboardButton("📄 Мой заказ"), KeyboardButton("✏️ Добавить пожелания")],
+        [KeyboardButton("📞 Отправить телефон и оформить", request_contact=True)]
+    ], resize_keyboard=True)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Проверка при старте
     if not await check_subscription(update, context):
         await ask_subscription(update)
         return
 
-    web_app_url = "https://kovka007.vercel.app"
-    
-    kb = [
-        [KeyboardButton("🏗 Открыть конструктор", web_app=WebAppInfo(url=web_app_url))],
-        [KeyboardButton("📄 Мой заказ"), KeyboardButton("✏️ Добавить пожелания")],
-        [KeyboardButton("🆘 Помощь")]
-    ]
-    
+    # Не сбрасываем user_data['order_data'], чтобы заказ сохранялся
     await update.message.reply_text(
-        f"👋 Привет, {update.effective_user.first_name}!\n\n"
-        "Добро пожаловать в бота <b>Kovka007</b>.\n"
-        "Здесь вы можете рассчитать стоимость навеса за 1 минуту.",
-        reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True),
-        parse_mode=ParseMode.HTML
+        "👋 <b>Главное меню</b>\n\nРассчитайте навес в конструкторе или дополните текущий заказ.",
+        reply_markup=await get_main_keyboard(), parse_mode=ParseMode.HTML
     )
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка кнопки 'Я подписался'"""
     query = update.callback_query
-    
+    await query.answer()
     if query.data == "check_sub":
         if await check_subscription(update, context):
-            await query.answer("✅ Спасибо за подписку!")
-            await query.message.delete() # Удаляем просьбу о подписке
-            await start(update, context) # Запускаем меню
+            await query.message.delete()
+            await start(update, context)
         else:
-            await query.answer("❌ Вы еще не подписались!", show_alert=True)
+            await query.message.reply_text("❌ Нет подписки!", ephemeral=True)
 
 async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Меню бота"""
-    # Сначала проверяем подписку на каждое действие
     if not await check_subscription(update, context):
         await ask_subscription(update)
         return
 
     text = update.message.text
     
+    # 1. МОЙ ЗАКАЗ
     if text == "📄 Мой заказ":
         order = context.user_data.get('order_data')
-        if not order:
-            await update.message.reply_text("📭 Корзина пуста. Откройте конструктор, чтобы создать заказ.")
-            return
-        
-        rtype = ROOF_TYPES.get(order.get('type'), order.get('type'))
         comment = context.user_data.get('user_comment', 'Нет')
         
+        if not order:
+            await update.message.reply_text("📭 <b>Корзина пуста</b>\nОткройте конструктор, чтобы создать заказ.", parse_mode=ParseMode.HTML)
+            return
+        
         msg = (
-            f"📋 <b>ВАШ ЗАКАЗ</b>\n\n"
+            f"📋 <b>ВАШ ТЕКУЩИЙ ЗАКАЗ</b>\n"
             f"🆔 <code>{order.get('id')}</code>\n"
-            f"🏗 {rtype}\n"
+            f"🏗 {ROOF_TYPES.get(order.get('type'), order.get('type'))}\n"
             f"📏 {order.get('width')}x{order.get('length')} м\n"
-            f"💰 {order.get('price', 0):,} руб.\n\n"
-            f"📝 <b>Комментарий:</b> {comment}"
+            f"💰 <b>{order.get('price', 0):,} руб.</b>\n\n"
+            f"💬 <b>Ваши пожелания:</b> {comment}\n\n"
+            f"👇 <i>Нажмите 'Отправить телефон' в меню, чтобы отправить заявку.</i>"
         )
         await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
+    # 2. ДОБАВИТЬ ПОЖЕЛАНИЯ
     elif text == "✏️ Добавить пожелания":
         context.user_data['waiting_for_comment'] = True
-        await update.message.reply_text("✍️ Напишите ваши пожелания к заказу одним сообщением:")
+        await update.message.reply_text(
+            "✍️ <b>Напишите ваши пожелания</b> одним сообщением (например: 'Нужен монтаж в субботу'):",
+            reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🔙 Отмена")]], resize_keyboard=True),
+            parse_mode=ParseMode.HTML
+        )
 
-    elif text == "🆘 Помощь":
-        await update.message.reply_text("По всем вопросам пишите: @thetaranov")
-    
+    # 3. ОТМЕНА ВВОДА
+    elif text == "🔙 Отмена":
+        context.user_data['waiting_for_comment'] = False
+        await update.message.reply_text("Ввод отменен.", reply_markup=await get_main_keyboard())
+
+    # 4. СОХРАНЕНИЕ КОММЕНТАРИЯ
     elif context.user_data.get('waiting_for_comment'):
         context.user_data['user_comment'] = text
         context.user_data['waiting_for_comment'] = False
-        await update.message.reply_text("✅ Комментарий сохранен!")
+        
+        # Подтверждение
+        await update.message.reply_text(
+            f"✅ <b>Пожелание добавлено к заказу!</b>\n\n<i>\"{text}\"</i>\n\nТеперь отправьте телефон для оформления.",
+            reply_markup=await get_main_keyboard(),
+            parse_mode=ParseMode.HTML
+        )
 
-# === ОБРАБОТКА ДАННЫХ И КОНТАКТА ===
-
+# === ПОЛУЧЕНИЕ ДАННЫХ ИЗ WEBAPP ===
 async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Данные принимаем даже без подписки, но оформить не дадим без нее
     try:
         data_str = update.effective_message.web_app_data.data
         raw_data = json.loads(data_str)
@@ -171,44 +160,43 @@ async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE)
             'opts': raw_data.get('opts', {})
         }
 
+        # Сохраняем в память
         context.user_data['order_data'] = order_data
         
-        rtype = ROOF_TYPES.get(order_data['type'], order_data['type'])
-        
+        # Если комментария еще нет, ставим "Нет"
+        if 'user_comment' not in context.user_data:
+            context.user_data['user_comment'] = 'Нет'
+
         text = (
-            f"✅ <b>Расчет готов!</b>\n"
+            f"✅ <b>Расчет получен!</b>\n"
             f"🆔 <code>{order_data['id']}</code>\n"
-            f"🏗 {rtype} ({order_data['width']}x{order_data['length']}м)\n"
             f"💰 <b>{order_data['price']:,} руб.</b>\n\n"
-            f"👇 Нажмите кнопку ниже, чтобы отправить заявку."
+            f"Вы можете добавить пожелания через кнопку ✏️ или сразу оформить заказ."
         )
         
-        kb = [[KeyboardButton("📞 Отправить телефон", request_contact=True)]]
-        await update.message.reply_text(
-            text, 
-            reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True),
-            parse_mode=ParseMode.HTML
-        )
+        await update.message.reply_text(text, reply_markup=await get_main_keyboard(), parse_mode=ParseMode.HTML)
         
     except Exception as e:
         logger.error(f"Error: {e}")
 
+# === ОФОРМЛЕНИЕ ЗАКАЗА ===
 async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Проверяем подписку перед отправкой админу
     if not await check_subscription(update, context):
         await ask_subscription(update)
         return
 
     user = update.effective_user
     contact = update.message.contact
+    
+    # Берем данные из памяти
     order = context.user_data.get('order_data')
     comment = context.user_data.get('user_comment', 'Нет')
     
     if not order:
-        await update.message.reply_text("⚠️ Ошибка: нет данных заказа.")
+        await update.message.reply_text("⚠️ Данные заказа не найдены. Пожалуйста, откройте конструктор и нажмите 'Оформить'.")
         return
 
-    # Сохранение в историю
+    # Сохраняем в историю (для админки)
     if 'orders_history' not in context.bot_data:
         context.bot_data['orders_history'] = []
     
@@ -219,12 +207,12 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'phone': contact.phone_number
     })
 
-    # Формирование отчета
+    # Формируем опции
     opts = order.get('opts', {})
     options_list = []
     if opts.get('trusses'): options_list.append("✅ Усил. фермы")
     if opts.get('gutters'): options_list.append("✅ Водостоки")
-    if opts.get('walls'): options_list.append("✅ Боковая зашивка")
+    if opts.get('walls'): options_list.append("✅ Зашивка")
     if opts.get('found'): options_list.append("✅ Фундамент")
     if opts.get('install'): options_list.append("✅ Монтаж")
     options_str = "\n".join(options_list) if options_list else "Базовая"
@@ -234,22 +222,21 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"➖➖➖➖➖➖➖➖➖➖\n"
         f"👤 <b>Клиент:</b> {user.first_name}\n"
         f"🔗 <b>Link:</b> @{user.username if user.username else 'Нет'}\n"
-        f"📞 <b>Tel:</b> <code>{contact.phone_number}</code>\n"
+        f"📞 <b>Phone:</b> <code>{contact.phone_number}</code>\n"
         f"💬 <b>Пожелания:</b> {comment}\n"
         f"➖➖➖➖➖➖➖➖➖➖\n"
         f"🆔 <b>ID:</b> <code>{order.get('id')}</code>\n"
         f"🏗 <b>Тип:</b> {ROOF_TYPES.get(order.get('type'))}\n"
         f"📏 <b>Ширина:</b> {order.get('width')} м\n"
         f"📏 <b>Длина:</b> {order.get('length')} м\n"
-        f"↕️ <b>Высота (проезд):</b> {order.get('height')} м\n"
-        f"🏔 <b>Высота (общая):</b> ~{order.get('height_peak')} м\n"
-        f"🧱 <b>Столбы:</b> {order.get('pillar')}\n"
+        f"↕️ <b>Высота:</b> {order.get('height')} м\n"
+        f"🏔 <b>В коньке:</b> ~{order.get('height_peak')} м\n"
+        f"📐 <b>Уклон:</b> {order.get('slope')}°\n"
+        f"🧱 <b>Столб:</b> {order.get('pillar')}\n"
         f"➖➖➖➖➖➖➖➖➖➖\n"
-        f"🔲 <b>S пола:</b> {order.get('area_floor')} м²\n"
-        f"🏠 <b>S кровли:</b> {order.get('area_roof')} м²\n"
-        f"🏠 <b>Кровля:</b> {MATERIALS.get(order.get('material'))}\n"
-        f"🖌 <b>Цвет:</b> {order.get('color_frame')} / {order.get('color_roof')}\n"
+        f"🏠 <b>Материал:</b> {MATERIALS.get(order.get('material'))}\n"
         f"🎨 <b>Покраска:</b> {PAINTS.get(order.get('paint'))}\n"
+        f"🖌 <b>Цвет:</b> {order.get('color_frame')} / {order.get('color_roof')}\n"
         f"➖➖➖➖➖➖➖➖➖➖\n"
         f"🛠 <b>Опции:</b>\n{options_str}\n"
         f"➖➖➖➖➖➖➖➖➖➖\n"
@@ -261,19 +248,23 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Channel error: {e}")
 
-    await start(update, context) # Возврат в меню
-    await update.message.reply_text("✅ Заказ отправлен менеджеру!")
+    await update.message.reply_text(
+        "✅ <b>Заявка принята!</b>\n"
+        "Менеджер получил ваш расчет и комментарий.\n"
+        "Мы свяжемся с вами в ближайшее время.",
+        reply_markup=await get_main_keyboard(),
+        parse_mode=ParseMode.HTML
+    )
+    
+    # Очищаем корзину после успешной отправки
     context.user_data.clear()
 
-# === АДМИНКА ===
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS: return
-    
     history = context.bot_data.get('orders_history', [])
-    msg = f"📊 <b>Заказов всего:</b> {len(history)}\n\n"
+    msg = f"📊 <b>История заказов ({len(history)}):</b>\n\n"
     for o in history[-5:]:
-        msg += f"🔹 {o['id']} | {o['price']}р | {o['user']}\n"
-    
+        msg += f"🔹 {o['id']} | {o['price']:,}р | {o['user']}\n"
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
 
 def main():
@@ -281,13 +272,14 @@ def main():
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("admin", admin_panel))
-    
     application.add_handler(CallbackQueryHandler(handle_callback))
     application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_webapp_data))
     application.add_handler(MessageHandler(filters.CONTACT, handle_contact))
+    
+    # Текстовые сообщения (меню + комментарии)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu_text))
 
-    logger.info("🚀 Бот запущен (SUB CHECK)")
+    logger.info("🚀 Бот запущен (FIXED STATE)")
     application.run_polling()
 
 if __name__ == '__main__':
