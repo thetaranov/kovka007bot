@@ -59,29 +59,7 @@ def start(update, context):
                     order_data = json.loads(order_data_json)
                     logger.info("✅ Успешно распарсены данные заказа:")
                     logger.info(f"ID: {order_data.get('id')}")
-                    logger.info(f"Тип: {order_data.get('t')}")
-                    logger.info(f"Размеры: {order_data.get('dims', {})}")
-                    logger.info(f"Стоимость: {order_data.get('pr')}")
-                    
-                    # Сохраняем данные
-                    context.user_data['order_data'] = order_data
-                    
-                    # Запрашиваем контакт
-                    keyboard = [[KeyboardButton("📞 Отправить номер телефона", request_contact=True)]]
-                    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
-                    
-                    # Форматируем сообщение
-                    dims = order_data.get('dims', {})
-                    message_text = (
-                        f"🎉 Отлично, {user.first_name}!\n\n"
-                        f"📐 Ваш навес:\n"
-                        f"• Размер: {dims.get('w', 'N/A')}×{dims.get('l', 'N/A')}м\n"
-                        f"• Высота: {dims.get('h', 'N/A')}м\n"
-                        f"• Стоимость: {order_data.get('pr', 0):,} руб.\n\n"
-                        f"📞 Для оформления заказа поделитесь номером телефона:"
-                    )
-                    
-                    update.message.reply_text(message_text, reply_markup=reply_markup)
+                    process_order_data(update, context, order_data)
                     return
                     
                 except json.JSONDecodeError as e:
@@ -107,6 +85,72 @@ def start(update, context):
         "Я бот для заказов навесов. Нажмите кнопку ниже чтобы создать навес в конструкторе:",
         reply_markup=reply_markup
     )
+
+def handle_webapp_data(update, context):
+    """Обрабатывает данные из WebApp"""
+    try:
+        user = update.effective_user
+        text = update.message.text
+        
+        logger.info(f"=== ДАННЫЕ ИЗ WEBAPP ===")
+        logger.info(f"Пользователь: {user.first_name} (ID: {user.id})")
+        logger.info(f"Полученные данные: {text}")
+        
+        # Пытаемся распарсить JSON
+        order_data = json.loads(text)
+        
+        if 'id' in order_data and order_data['id'].startswith('CFG-'):
+            logger.info("✅ Получены валидные данные заказа из WebApp")
+            process_order_data(update, context, order_data)
+        else:
+            logger.warning("❌ Получены невалидные данные из WebApp")
+            update.message.reply_text("❌ Получены неверные данные заказа")
+            
+    except json.JSONDecodeError as e:
+        logger.error(f"❌ Ошибка парсинга JSON из WebApp: {e}")
+        # Если это не JSON, возможно это обычное сообщение
+        handle_message(update, context)
+    except Exception as e:
+        logger.error(f"❌ Ошибка обработки данных WebApp: {e}")
+        update.message.reply_text("❌ Ошибка обработки заказа")
+
+def process_order_data(update, context, order_data):
+    """Обрабатывает данные заказа"""
+    logger.info(f"📦 Обрабатываем заказ {order_data.get('id')}")
+    
+    user = update.effective_user
+    
+    # Сохраняем данные
+    context.user_data['order_data'] = order_data
+    
+    # Форматируем сообщение
+    roof_type_map = {
+        'single': 'Односкатная',
+        'gable': 'Двускатная', 
+        'arched': 'Арочная',
+        'triangular': 'Треугольная',
+        'semiarched': 'Полуарочная'
+    }
+    
+    roof_type = roof_type_map.get(order_data.get('t', ''), order_data.get('t', 'N/A'))
+    dims = order_data.get('dims', {})
+    
+    message_text = (
+        f"🎉 Заказ {order_data.get('id')} получен!\n\n"
+        f"📐 Параметры навеса:\n"
+        f"• Тип: {roof_type}\n"
+        f"• Размер: {dims.get('w', 'N/A')}×{dims.get('l', 'N/A')}м\n"
+        f"• Высота: {dims.get('h', 'N/A')}м\n"
+        f"• Уклон: {dims.get('sl', 'N/A')}°\n"
+        f"💰 Стоимость: {order_data.get('pr', 0):,} руб.\n\n"
+        f"📞 Для оформления заказа поделитесь номером телефона:"
+    )
+    
+    keyboard = [[KeyboardButton("📞 Отправить номер телефона", request_contact=True)]]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
+    
+    update.message.reply_text(message_text, reply_markup=reply_markup)
+    logger.info("✅ Сообщение с деталями заказа отправлено")
 
 def handle_contact(update, context):
     contact = update.message.contact
@@ -150,7 +194,14 @@ def handle_contact(update, context):
         del context.user_data['order_data']
 
 def handle_message(update, context):
-    update.message.reply_text("Нажмите /start чтобы начать работу с ботом.")
+    text = update.message.text
+    
+    # Пытаемся определить, это данные из WebApp или обычное сообщение
+    if text.strip().startswith('{') and text.strip().endswith('}'):
+        logger.info("🔍 Обнаружены данные в формате JSON, пробуем обработать как WebApp данные")
+        handle_webapp_data(update, context)
+    else:
+        update.message.reply_text("Нажмите /start чтобы начать работу с ботом.")
 
 def main():
     updater = Updater(BOT_TOKEN, use_context=True)
