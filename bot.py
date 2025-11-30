@@ -9,7 +9,6 @@ from keep_alive import keep_alive
 # Запуск сервера
 keep_alive()
 
-# Логирование
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
@@ -18,26 +17,16 @@ logger = logging.getLogger(__name__)
 
 # === КОНФИГУРАЦИЯ ===
 BOT_TOKEN = os.getenv('BOT_TOKEN')
-ADMIN_CHANNEL_ID = -1003250531931  # Канал для заявок
-INFO_CHANNEL_ID = -1003461235309   # Канал для подписки
+ADMIN_CHANNEL_ID = -1003250531931
+INFO_CHANNEL_ID = -1003461235309
 INFO_CHANNEL_LINK = "https://t.me/taranov_public"
-ADMIN_IDS = [7746957973] # Ваш ID
+ADMIN_IDS = [7746957973] 
 
-if not BOT_TOKEN:
-    logger.error("BOT_TOKEN не установлен!")
-    exit(1)
+if not BOT_TOKEN: exit(1)
 
-# Справочники
-ROOF_TYPES = {
-    'single': 'Односкатный', 'gable': 'Двускатный', 'arched': 'Арочный',
-    'triangular': 'Треугольный', 'semiarched': 'Полуарочный'
-}
-MATERIALS = {
-    'polycarbonate': 'Сотовый поликарбонат', 'metaltile': 'Металлочерепица', 'decking': 'Профнастил'
-}
-PAINTS = {
-    'none': 'Грунт-эмаль', 'ral': 'Эмаль RAL', 'polymer': 'Полимерно-порошковая'
-}
+ROOF_TYPES = {'single': 'Односкатный', 'gable': 'Двускатный', 'arched': 'Арочный', 'triangular': 'Треугольный', 'semiarched': 'Полуарочный'}
+MATERIALS = {'polycarbonate': 'Сотовый поликарбонат', 'metaltile': 'Металлочерепица', 'decking': 'Профнастил'}
+PAINTS = {'none': 'Грунт-эмаль', 'ral': 'Эмаль RAL', 'polymer': 'Полимерно-порошковая'}
 
 # === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
 
@@ -50,10 +39,8 @@ async def get_main_keyboard():
     ], resize_keyboard=True)
 
 async def check_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Проверка подписки"""
     user_id = update.effective_user.id
-    if user_id in ADMIN_IDS: return True # Админа пускаем всегда
-    
+    if user_id in ADMIN_IDS: return True
     try:
         member = await context.bot.get_chat_member(chat_id=INFO_CHANNEL_ID, user_id=user_id)
         if member.status in ['left', 'kicked', 'restricted']:
@@ -64,108 +51,19 @@ async def check_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return True
 
 async def ask_subscription(update: Update):
-    """Экран блокировки"""
     kb = [
         [InlineKeyboardButton("📢 Подписаться на канал", url=INFO_CHANNEL_LINK)],
         [InlineKeyboardButton("✅ Я подписался", callback_data="check_sub")]
     ]
     await update.message.reply_text(
-        "🚫 <b>Доступ ограничен!</b>\n\n"
-        "Чтобы пользоваться ботом, подпишитесь на наш канал.",
-        reply_markup=InlineKeyboardMarkup(kb),
-        parse_mode=ParseMode.HTML
+        "🚫 <b>Доступ ограничен!</b>\n\nПодпишитесь на канал, чтобы пользоваться ботом.",
+        reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.HTML
     )
 
-# === ОБРАБОТЧИКИ ===
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await check_subscription(update, context):
-        await ask_subscription(update)
-        return
-
-    await update.message.reply_text(
-        f"👋 Добро пожаловать, {update.effective_user.first_name}!\n\n"
-        "Рассчитайте стоимость навеса в конструкторе и отправьте заявку.",
-        reply_markup=await get_main_keyboard(),
-        parse_mode=ParseMode.HTML
-    )
-
-async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Проверка подписки по кнопке"""
-    query = update.callback_query
-    
-    if query.data == "check_sub":
-        if await check_subscription(update, context):
-            await query.answer("✅ Подписка подтверждена!")
-            await query.message.delete()
-            
-            # Сразу показываем меню
-            await query.message.reply_text(
-                f"👋 Добро пожаловать, {update.effective_user.first_name}!\n\n"
-                "Меню доступно 👇",
-                reply_markup=await get_main_keyboard(),
-                parse_mode=ParseMode.HTML
-            )
-        else:
-            await query.answer("❌ Вы еще не подписались!", show_alert=True)
-
-async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await check_subscription(update, context):
-        await ask_subscription(update)
-        return
-
-    text = update.message.text
-    
-    # 1. МОЙ ЗАКАЗ
-    if text == "📄 Мой заказ":
-        order = context.user_data.get('order_data')
-        comment = context.user_data.get('user_comment', 'Нет')
-        
-        if not order:
-            await update.message.reply_text("📭 <b>Корзина пуста</b>\nОткройте конструктор!", parse_mode=ParseMode.HTML)
-            return
-        
-        rtype = ROOF_TYPES.get(order.get('type'), order.get('type'))
-        
-        msg = (
-            f"📋 <b>ВАШ ЗАКАЗ</b>\n"
-            f"🆔 <code>{order.get('id')}</code>\n"
-            f"🏗 {rtype}\n"
-            f"💰 <b>{order.get('price', 0):,} руб.</b>\n\n"
-            f"📝 <b>Комментарий:</b> {comment}\n\n"
-            f"👇 <i>Нажмите 'Отправить телефон' для оформления.</i>"
-        )
-        await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
-
-    # 2. ПОЖЕЛАНИЯ
-    elif text == "✏️ Добавить пожелания":
-        context.user_data['waiting_for_comment'] = True
-        cancel_kb = ReplyKeyboardMarkup([[KeyboardButton("🔙 Отмена")]], resize_keyboard=True)
-        await update.message.reply_text("✍️ Напишите ваши пожелания одним сообщением:", reply_markup=cancel_kb)
-
-    # 3. ОТМЕНА
-    elif text == "🔙 Отмена":
-        context.user_data['waiting_for_comment'] = False
-        await update.message.reply_text("Ввод отменен.", reply_markup=await get_main_keyboard())
-
-    # 4. СОХРАНЕНИЕ КОММЕНТАРИЯ
-    elif context.user_data.get('waiting_for_comment'):
-        context.user_data['user_comment'] = text
-        context.user_data['waiting_for_comment'] = False
-        await update.message.reply_text(
-            f"✅ Комментарий сохранен!\n<i>\"{text}\"</i>",
-            reply_markup=await get_main_keyboard(),
-            parse_mode=ParseMode.HTML
-        )
-
-# === ДАННЫЕ ИЗ WEBAPP ===
-
-async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# === ОБЩАЯ ФУНКЦИЯ ОБРАБОТКИ ЗАКАЗА (ИЗ WEBAPP ИЛИ ТЕКСТА) ===
+async def process_order_json(update: Update, context: ContextTypes.DEFAULT_TYPE, raw_data):
+    """Парсит JSON и сохраняет заказ"""
     try:
-        data_str = update.effective_message.web_app_data.data
-        raw_data = json.loads(data_str)
-        
-        # Нормализация
         order_data = {
             'id': raw_data.get('id'),
             'type': raw_data.get('type') or raw_data.get('t'),
@@ -191,20 +89,107 @@ async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE)
             context.user_data['user_comment'] = 'Нет'
 
         text = (
-            f"🔄 <b>Расчет обновлен!</b>\n"
+            f"🔄 <b>Данные приняты!</b>\n"
             f"🆔 <code>{order_data['id']}</code>\n"
             f"💰 Сумма: <b>{order_data['price']:,} руб.</b>\n\n"
             f"👇 <b>Нажмите кнопку ниже, чтобы отправить заявку.</b>"
         )
         
         await update.message.reply_text(text, reply_markup=await get_main_keyboard(), parse_mode=ParseMode.HTML)
+    except Exception as e:
+        logger.error(f"Processing Error: {e}")
+        await update.message.reply_text("❌ Ошибка в данных заказа.")
+
+# === ОБРАБОТЧИКИ ===
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await check_subscription(update, context):
+        await ask_subscription(update)
+        return
+
+    await update.message.reply_text(
+        f"👋 Привет, {update.effective_user.first_name}!\n\n"
+        "Рассчитайте стоимость навеса в конструкторе и отправьте заявку.",
+        reply_markup=await get_main_keyboard(),
+        parse_mode=ParseMode.HTML
+    )
+
+async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if query.data == "check_sub":
+        await query.answer()
+        if await check_subscription(update, context):
+            await query.message.delete()
+            await start(update, context)
+        else:
+            await query.message.reply_text("❌ Вы еще не подписались!", ephemeral=True)
+
+async def handle_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await check_subscription(update, context):
+        await ask_subscription(update)
+        return
+
+    text = update.message.text.strip()
+    
+    # ПРОВЕРКА НА РУЧНОЙ ВВОД JSON (Для десктопной версии)
+    if text.startswith('{') and text.endswith('}'):
+        try:
+            data = json.loads(text)
+            if 'id' in data: # Это точно заказ
+                await process_order_json(update, context, data)
+                return
+        except:
+            pass
+
+    if text == "📄 Мой заказ":
+        order = context.user_data.get('order_data')
+        comment = context.user_data.get('user_comment', 'Нет')
         
+        if not order:
+            await update.message.reply_text("📭 Корзина пуста. Откройте конструктор!")
+            return
+        
+        rtype = ROOF_TYPES.get(order.get('type'), order.get('type'))
+        
+        msg = (
+            f"📋 <b>ВАШ ЗАКАЗ</b>\n"
+            f"🆔 <code>{order.get('id')}</code>\n"
+            f"🏗 {rtype} ({order.get('width')}x{order.get('length')}м)\n"
+            f"💰 <b>{order.get('price', 0):,} руб.</b>\n\n"
+            f"📝 <b>Комментарий:</b> {comment}\n\n"
+            f"👇 <i>Нажмите 'Отправить телефон' для оформления.</i>"
+        )
+        await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+
+    elif text == "✏️ Добавить пожелания":
+        context.user_data['waiting_for_comment'] = True
+        cancel_kb = ReplyKeyboardMarkup([[KeyboardButton("🔙 Отмена")]], resize_keyboard=True)
+        await update.message.reply_text("✍️ Напишите ваши пожелания одним сообщением:", reply_markup=cancel_kb)
+
+    elif text == "🔙 Отмена":
+        context.user_data['waiting_for_comment'] = False
+        await update.message.reply_text("Ввод отменен.", reply_markup=await get_main_keyboard())
+
+    elif context.user_data.get('waiting_for_comment'):
+        context.user_data['user_comment'] = text
+        context.user_data['waiting_for_comment'] = False
+        await update.message.reply_text(
+            f"✅ Комментарий сохранен!\n<i>\"{text}\"</i>",
+            reply_markup=await get_main_keyboard(),
+            parse_mode=ParseMode.HTML
+        )
+
+# === ПОЛУЧЕНИЕ ДАННЫХ ИЗ WEBAPP ===
+async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        data_str = update.effective_message.web_app_data.data
+        raw_data = json.loads(data_str)
+        await process_order_json(update, context, raw_data)
     except Exception as e:
         logger.error(f"WebApp Error: {e}")
-        await update.message.reply_text("❌ Ошибка данных.")
+        await update.message.reply_text("❌ Ошибка получения данных.")
 
 # === ОФОРМЛЕНИЕ ЗАЯВКИ ===
-
 async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_subscription(update, context):
         await ask_subscription(update)
@@ -219,7 +204,7 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Ошибка: Нет активного заказа.")
         return
 
-    # История
+    # Сохранение в историю
     if 'orders_history' not in context.bot_data:
         context.bot_data['orders_history'] = []
     
@@ -238,11 +223,10 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if opts.get('walls'): options_list.append("✅ Зашивка")
     if opts.get('found'): options_list.append("✅ Фундамент")
     if opts.get('install'): options_list.append("✅ Монтаж")
-    options_str = "\n".join(options_list) if options_list else "Базовая"
+    options_str = "\n".join(options_list) if options_list else "Базовая комплектация"
 
-    # Отчет админу
     admin_report = (
-        f"🚨 <b>НОВЫЙ ЗАКАЗ!</b>\n"
+        f"🚨 <b>НОВАЯ ЗАЯВКА!</b>\n"
         f"➖➖➖➖➖➖➖➖➖➖\n"
         f"👤 <b>Клиент:</b> {user.first_name}\n"
         f"🔗 <b>Link:</b> @{user.username if user.username else 'Нет'}\n"
@@ -255,6 +239,7 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📏 <b>Длина:</b> {order.get('length')} м\n"
         f"↕️ <b>Высота (столб):</b> {order.get('height')} м\n"
         f"🏔 <b>Высота (общ):</b> ~{order.get('height_peak')} м\n"
+        f"📐 <b>Уклон:</b> {order.get('slope')}°\n"
         f"🧱 <b>Сечение:</b> {order.get('pillar')}\n"
         f"➖➖➖➖➖➖➖➖➖➖\n"
         f"🔲 <b>S пола:</b> {order.get('area_floor')} м²\n"
@@ -274,19 +259,17 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Channel error: {e}")
 
     await update.message.reply_text(
-        "✅ <b>Заявка принята!</b>\nМенеджер скоро свяжется с вами.",
+        "✅ <b>Заявка принята!</b>\nМенеджер свяжется с вами в ближайшее время.",
         reply_markup=await get_main_keyboard(),
         parse_mode=ParseMode.HTML
     )
     
     context.user_data.clear()
 
-# === АДМИНКА ===
-
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS: return
     history = context.bot_data.get('orders_history', [])
-    msg = f"📊 <b>История заказов:</b> {len(history)}\n\n"
+    msg = f"📊 <b>Всего заказов:</b> {len(history)}\n\n"
     for o in history[-5:]:
         msg += f"🔹 {o['id']} | {o['price']:,}р | {o['user']}\n"
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
@@ -307,7 +290,7 @@ def main():
     application.add_handler(MessageHandler(filters.CONTACT, handle_contact))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu_text))
 
-    logger.info("🚀 Бот запущен (FINAL v2)")
+    logger.info("🚀 Бот запущен (DESKTOP+MOBILE)")
     application.run_polling()
 
 if __name__ == '__main__':
