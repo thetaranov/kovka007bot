@@ -57,9 +57,9 @@ def start(update, context):
             if order_data_json:
                 try:
                     order_data = json.loads(order_data_json)
-                    logger.info("✅ Успешно распарсены данные заказа:")
+                    logger.info("✅ Успешно распарсены данные заказа из Deep Link:")
                     logger.info(f"ID: {order_data.get('id')}")
-                    process_order_data(update, context, order_data)
+                    process_order_data(update, context, order_data, "Deep Link")
                     return
                     
                 except json.JSONDecodeError as e:
@@ -86,42 +86,94 @@ def start(update, context):
         reply_markup=reply_markup
     )
 
-def handle_webapp_data(update, context):
-    """Обрабатывает данные из WebApp"""
+def handle_all_messages(update, context):
+    """Обработчик ВСЕХ сообщений"""
     try:
         user = update.effective_user
         text = update.message.text
         
-        logger.info(f"=== ДАННЫЕ ИЗ WEBAPP ===")
-        logger.info(f"Пользователь: {user.first_name} (ID: {user.id})")
-        logger.info(f"Полученные данные: {text}")
+        logger.info("=" * 50)
+        logger.info(f"📨 ПОЛУЧЕНО СООБЩЕНИЕ")
+        logger.info(f"👤 От: {user.first_name} (ID: {user.id})")
+        logger.info(f"💬 Текст: {text}")
         
-        # Пытаемся распарсить JSON
-        order_data = json.loads(text)
-        
-        if 'id' in order_data and order_data['id'].startswith('CFG-'):
-            logger.info("✅ Получены валидные данные заказа из WebApp")
-            process_order_data(update, context, order_data)
-        else:
-            logger.warning("❌ Получены невалидные данные из WebApp")
-            update.message.reply_text("❌ Получены неверные данные заказа")
+        # Проверяем, является ли сообщение контактом
+        if update.message.contact:
+            logger.info("📞 Это контакт!")
+            handle_contact(update, context)
+            return
             
-    except json.JSONDecodeError as e:
-        logger.error(f"❌ Ошибка парсинга JSON из WebApp: {e}")
-        # Если это не JSON, возможно это обычное сообщение
-        handle_message(update, context)
+        # Проверяем, является ли сообщение командой /start
+        if text.startswith('/start'):
+            logger.info("🎯 Это команда /start")
+            start(update, context)
+            return
+        
+        # Пытаемся распарсить как JSON (данные из WebApp или ручная вставка)
+        text_stripped = text.strip()
+        if text_stripped.startswith('{') and text_stripped.endswith('}'):
+            logger.info("🔍 Обнаружен JSON, пробуем распарсить как данные заказа")
+            try:
+                order_data = json.loads(text_stripped)
+                logger.info(f"📊 Распарсенный JSON: {order_data}")
+                
+                # Проверяем, что это данные заказа (есть ID и он начинается с CFG-)
+                if 'id' in order_data and order_data['id'].startswith('CFG-'):
+                    logger.info("✅ Это валидные данные заказа!")
+                    process_order_data(update, context, order_data, "WebApp/Ручная вставка")
+                    return
+                else:
+                    logger.warning("⚠️ JSON не содержит ID заказа")
+                    update.message.reply_text(
+                        "❌ Это не данные заказа. Пожалуйста, скопируйте данные из конструктора навесов."
+                    )
+                    return
+                    
+            except json.JSONDecodeError as e:
+                logger.error(f"❌ Ошибка парсинга JSON: {e}")
+                update.message.reply_text("❌ Неверный формат данных. Пожалуйста, скопируйте данные из конструктора.")
+                return
+            except Exception as e:
+                logger.error(f"❌ Ошибка обработки JSON: {e}")
+                update.message.reply_text("❌ Ошибка обработки данных.")
+                return
+        
+        # Если не JSON и не команда - показываем инструкцию
+        show_instructions(update, user)
+        
     except Exception as e:
-        logger.error(f"❌ Ошибка обработки данных WebApp: {e}")
-        update.message.reply_text("❌ Ошибка обработки заказа")
+        logger.error(f"💥 Ошибка в handle_all_messages: {e}", exc_info=True)
+        update.message.reply_text("❌ Произошла ошибка. Попробуйте еще раз.")
 
-def process_order_data(update, context, order_data):
+def show_instructions(update, user):
+    """Показывает инструкцию"""
+    keyboard = [
+        [InlineKeyboardButton("🏗️ Создать навес", url="https://kovka007.vercel.app")],
+        [InlineKeyboardButton("📞 Связаться с менеджером", url="https://t.me/thetaranov")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    update.message.reply_text(
+        f"📋 *Я жду данные по заказу!*\n\n"
+        f"Чтобы сделать заказ, {user.first_name}:\n"
+        "1. Нажмите кнопку 'Создать навес' ниже\n"
+        "2. Настройте параметры в конструкторе\n"
+        "3. Нажмите 'Создать заказ' - данные отправятся автоматически\n"
+        "4. Если автоматическая отправка не сработала, данные скопируются и вы сможете вставить их здесь\n\n"
+        "Или свяжитесь с менеджером для помощи:",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+
+def process_order_data(update, context, order_data, source):
     """Обрабатывает данные заказа"""
-    logger.info(f"📦 Обрабатываем заказ {order_data.get('id')}")
+    logger.info(f"📦 Обрабатываем заказ {order_data.get('id')} из {source}")
     
     user = update.effective_user
     
     # Сохраняем данные
     context.user_data['order_data'] = order_data
+    logger.info("💾 Данные заказа сохранены")
     
     # Форматируем сообщение
     roof_type_map = {
@@ -133,85 +185,91 @@ def process_order_data(update, context, order_data):
     }
     
     roof_type = roof_type_map.get(order_data.get('t', ''), order_data.get('t', 'N/A'))
-    dims = order_data.get('dims', {})
     
     message_text = (
-        f"🎉 Заказ {order_data.get('id')} получен!\n\n"
-        f"📐 Параметры навеса:\n"
+        f"🎉 *Заказ {order_data.get('id')} получен!*\n\n"
+        f"📐 *Параметры навеса:*\n"
         f"• Тип: {roof_type}\n"
-        f"• Размер: {dims.get('w', 'N/A')}×{dims.get('l', 'N/A')}м\n"
-        f"• Высота: {dims.get('h', 'N/A')}м\n"
-        f"• Уклон: {dims.get('sl', 'N/A')}°\n"
-        f"💰 Стоимость: {order_data.get('pr', 0):,} руб.\n\n"
-        f"📞 Для оформления заказа поделитесь номером телефона:"
+        f"• Размер: {order_data.get('w', 'N/A')}×{order_data.get('l', 'N/A')}м\n"
+        f"• Высота: {order_data.get('h', 'N/A')}м\n"
+        f"• Уклон: {order_data.get('s', 'N/A')}°\n"
+        f"💰 *Стоимость:* {order_data.get('pr', 0):,} руб.\n\n"
+        f"📞 *Для оформления заказа поделитесь номером телефона:*"
     )
     
     keyboard = [[KeyboardButton("📞 Отправить номер телефона", request_contact=True)]]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
     
-    update.message.reply_text(message_text, reply_markup=reply_markup)
+    update.message.reply_text(message_text, reply_markup=reply_markup, parse_mode='Markdown')
     logger.info("✅ Сообщение с деталями заказа отправлено")
 
 def handle_contact(update, context):
-    contact = update.message.contact
-    user = update.effective_user
-    order_data = context.user_data.get('order_data', {})
-    
-    logger.info(f"=== ПОЛУЧЕН КОНТАКТ ===")
-    logger.info(f"Телефон: {contact.phone_number}")
-    logger.info(f"Данные заказа: {order_data}")
-
-    # Формируем сообщение для админа
-    admin_message = f"🚨 НОВЫЙ ЗАКАЗ!\n\n👤 Клиент: {user.first_name}\n📞 Телефон: {contact.phone_number}\n"
-    
-    if order_data:
-        dims = order_data.get('dims', {})
-        admin_message += (
-            f"📐 Конфигурация:\n"
-            f"• Размер: {dims.get('w', 'N/A')}×{dims.get('l', 'N/A')}м\n"
-            f"• Высота: {dims.get('h', 'N/A')}м\n"
-            f"• Стоимость: {order_data.get('pr', 0):,} руб.\n"
-            f"• ID: {order_data.get('id', 'N/A')}\n"
-        )
-    else:
-        admin_message += "💬 Клиент хочет обсудить конфигурацию\n"
-
+    """Обрабатывает контакт"""
     try:
-        # Отправляем админу
-        context.bot.send_message(chat_id=5216818742, text=admin_message)
-        logger.info("✅ Уведомление отправлено админу")
+        contact = update.message.contact
+        user = update.effective_user
+        order_data = context.user_data.get('order_data', {})
+        
+        logger.info("📞 ОБРАБОТКА КОНТАКТА")
+        logger.info(f"Телефон: {contact.phone_number}")
+        logger.info(f"Данные заказа: {order_data}")
+
+        # Формируем сообщение для админа
+        admin_message = f"🚨 НОВЫЙ ЗАКАЗ!\n\n👤 Клиент: {user.first_name}\n📞 Телефон: {contact.phone_number}\n"
+        
+        if order_data:
+            roof_type_map = {
+                'single': 'Односкатная',
+                'gable': 'Двускатная', 
+                'arched': 'Арочная',
+                'triangular': 'Треугольная',
+                'semiarched': 'Полуарочная'
+            }
+            
+            roof_type = roof_type_map.get(order_data.get('t', ''), order_data.get('t', 'N/A'))
+            
+            admin_message += (
+                f"📐 Конфигурация:\n"
+                f"• Тип: {roof_type}\n"
+                f"• Размер: {order_data.get('w', 'N/A')}×{order_data.get('l', 'N/A')}м\n"
+                f"• Высота: {order_data.get('h', 'N/A')}м\n"
+                f"• Стоимость: {order_data.get('pr', 0):,} руб.\n"
+                f"• ID: {order_data.get('id', 'N/A')}\n"
+            )
+        else:
+            admin_message += "💬 Клиент хочет обсудить конфигурацию\n"
+
+        try:
+            # Отправляем админу
+            context.bot.send_message(chat_id=5216818742, text=admin_message)
+            logger.info("✅ Уведомление отправлено админу")
+        except Exception as e:
+            logger.error(f"Ошибка отправки админу: {e}")
+
+        update.message.reply_text(
+            "✅ *Отлично! Ваш заказ принят!* 🏗️\n\n"
+            "В ближайшее время с вами свяжется менеджер для уточнения деталей.\n\n"
+            "Спасибо, что выбрали нас! 💙",
+            reply_markup=ReplyKeyboardMarkup([[]], resize_keyboard=True),
+            parse_mode='Markdown'
+        )
+
+        if 'order_data' in context.user_data:
+            del context.user_data['order_data']
+            
     except Exception as e:
-        logger.error(f"Ошибка отправки админу: {e}")
-
-    update.message.reply_text(
-        "✅ Отлично! Ваш заказ принят! 🏗️\n\n"
-        "В ближайшее время с вами свяжется менеджер для уточнения деталей.\n\n"
-        "Спасибо, что выбрали нас!",
-        reply_markup=ReplyKeyboardMarkup([[]], resize_keyboard=True)
-    )
-
-    if 'order_data' in context.user_data:
-        del context.user_data['order_data']
-
-def handle_message(update, context):
-    text = update.message.text
-    
-    # Пытаемся определить, это данные из WebApp или обычное сообщение
-    if text.strip().startswith('{') and text.strip().endswith('}'):
-        logger.info("🔍 Обнаружены данные в формате JSON, пробуем обработать как WebApp данные")
-        handle_webapp_data(update, context)
-    else:
-        update.message.reply_text("Нажмите /start чтобы начать работу с ботом.")
+        logger.error(f"💥 Ошибка в handle_contact: {e}", exc_info=True)
 
 def main():
     updater = Updater(BOT_TOKEN, use_context=True)
     dp = updater.dispatcher
+
+    # Используем один обработчик для всех сообщений
+    dp.add_handler(MessageHandler(Filters.all, handle_all_messages))
     
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(MessageHandler(Filters.contact, handle_contact))
-    dp.add_handler(MessageHandler(Filters.text, handle_message))
+    logger.info("🤖 Бот запущен с полной автоматизацией + резервным копированием")
+    logger.info("📡 Ожидаем сообщения...")
     
-    logger.info("🤖 Бот запускается...")
     updater.start_polling()
     updater.idle()
 
