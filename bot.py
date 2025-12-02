@@ -103,6 +103,136 @@ def format_order_message(order, user_name, user_link, phone, comment, status_cod
         f"💰 <b>ИТОГО: {order.get('price', 0):,} руб.</b>"
     )
 
+# === ПОДРОБНОЕ ПРИВЕТСТВИЕ ===
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Проверяем подписку
+    if not await check_subscription(update, context):
+        await ask_subscription(update)
+        return
+    
+    # Первая часть приветствия
+    welcome_part1 = """
+🎉 *Добро пожаловать в конструктор навесов KOVKA007!*
+
+Я помогу вам спроектировать и рассчитать стоимость навеса под ключ. Вот как это работает:
+
+*📋 ПЕРВЫЙ ЭТАП: Конструктор*
+
+1️⃣ Нажмите кнопку *«🏗 Открыть конструктор»* внизу экрана
+2️⃣ Откроется приложение, где вы сможете:
+   • Выбрать тип навеса (односкатный, двускатный, арочный и др.)
+   • Указать точные размеры (длина, ширина, высота)
+   • Выбрать материал кровли (поликарбонат, металлочерепица, профнастил)
+   • Подобрать цвет каркаса и кровли
+   • Добавить дополнительные опции (водостоки, усиление, монтаж и т.д.)
+3️⃣ После настройки всех параметров нажмите *«Рассчитать»*
+4️⃣ Система автоматически рассчитает стоимость и сформирует заказ
+
+*📝 ВТОРОЙ ЭТАП: Детализация заказа*
+
+После создания проекта в конструкторе:
+• Нажмите *«📄 Мой заказ»* - чтобы посмотреть детали расчетов
+• Нажмите *«✏️ Добавить пожелания/фото»* - если нужно:
+  - Отправить фото места установки
+  - Указать особые требования
+  - Добавить комментарии по монтажу
+"""
+    await update.message.reply_text(welcome_part1, parse_mode=ParseMode.MARKDOWN)
+    
+    # Вторая часть
+    welcome_part2 = """
+*📞 ТРЕТИЙ ЭТАП: Оформление заявки*
+
+Когда проект готов:
+1. Нажмите *«📞 Отправить телефон и оформить»*
+2. Подтвердите отправку вашего номера телефона
+3. Заявка автоматически поступит нашему менеджеру
+
+*⏱️ Что происходит после отправки заявки:*
+
+✅ В течение 15 минут с вами свяжется менеджер
+✅ Уточнит детали и ответит на вопросы
+✅ Подготовит коммерческое предложение
+✅ Согласует время выезда замерщика (бесплатно)
+✅ Заключит договор и согласует график работ
+
+*💰 Что входит в стоимость:*
+
+• Каркас из профильной трубы
+• Кровельный материал на выбор
+• Покраска в выбранный цвет
+• Все крепежи и фурнитура
+• Доставка материалов на объект
+• Монтаж (если выбрана опция)
+
+*🛡️ Наши гарантии:*
+
+• 3 года гарантии на каркас
+• 1 год гарантии на монтаж
+• Поэтапная оплата (50% предоплата, 50% после монтажа)
+• Официальный договор
+"""
+    await update.message.reply_text(welcome_part2, parse_mode=ParseMode.MARKDOWN)
+    
+    # Третья часть с FAQ
+    welcome_part3 = """
+*❓ Частые вопросы:*
+
+*Вопрос:* Можно ли изменить проект после отправки?
+*Ответ:* Да, менеджер поможет скорректировать любые параметры.
+
+*Вопрос:* Как быстро приедет замерщик?
+*Ответ:* В течение 24 часов после оформления заявки.
+
+*Вопрос:* Сколько длится монтаж?
+*Ответ:* Обычно 1-3 дня в зависимости от сложности.
+
+*Вопрос:* Нужен ли фундамент?
+*Ответ:* Для большинства навесов достаточно столбчатого фундамента, который мы включим в смету.
+
+*🔧 Начните создание вашего навеса прямо сейчас!*
+
+Просто нажмите кнопку *«🏗 Открыть конструктор»* ниже и следуйте инструкциям в приложении.
+
+📞 *Есть вопросы?* Пишите нам прямо в этот чат - отвечаем в рабочее время в течение 5 минут!
+
+*👇 Выберите действие в меню ниже:*
+"""
+    await update.message.reply_text(
+        welcome_part3,
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=await get_main_keyboard()
+    )
+    
+    # Четвертая часть с примерами и контактами
+    welcome_part4 = """
+*🏗️ Примеры наших работ и стоимость:*
+
+• *Навес для авто* (6x4м) - от 45 000 руб.
+• *Беседка с мангалом* (4x4м) - от 65 000 руб.
+• *Крыльцо с козырьком* (3x2м) - от 25 000 руб.
+• *Терраса у дома* (8x5м) - от 85 000 руб.
+
+*🎨 Популярные сочетания цветов:*
+
+1. Каркас: RAL 7016 (темно-серый) + Кровля: Прозрачный поликарбонат
+2. Каркас: RAL 3005 (красное вино) + Кровля: Коричневая металлочерепица
+3. Каркас: RAL 9003 (белый) + Кровля: Зеленый профнастил
+
+*📱 Наши контакты:*
+• Телефон: +7 (XXX) XXX-XX-XX
+• Email: info@kovka007.ru
+• Сайт: https://kovka007.vercel.app
+• Канал с примерами работ: https://t.me/taranov_public
+
+*⏰ Сезонные акции (действуют до конца месяца):*
+🎁 • Бесплатный выезд замерщика
+🎁 • Скидка 10% на материалы
+🎁 • Гарантия увеличенная до 5 лет
+"""
+    await update.message.reply_text(welcome_part4, parse_mode=ParseMode.MARKDOWN)
+
 # === АДМИН-ПАНЕЛЬ ===
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -235,10 +365,6 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 # === ПОЛЬЗОВАТЕЛЬСКИЕ ХЕНДЛЕРЫ ===
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await check_subscription(update, context): return
-    await update.message.reply_text("👋 Меню:", reply_markup=await get_main_keyboard())
-
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query.data == "check_sub":
         if await check_subscription(update, context):
@@ -247,9 +373,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else: await update.callback_query.answer("Нет подписки!", show_alert=True)
 
 async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await check_subscription(update, context): return
+    if not await check_subscription(update, context): 
+        await ask_subscription(update)
+        return
+    
     text = update.message.text.strip()
 
+    # Обработка смены статуса для админа
     if update.effective_user.id in ADMIN_IDS and text in ['1', '2', '3']:
         edit_id = context.user_data.get('admin_edit_order')
         if edit_id and edit_id in context.bot_data.get('orders', {}):
@@ -257,75 +387,155 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"✅ Статус обновлен: {STATUS_MAP[int(text)]}")
             return
     
+    # Обработка JSON данных из конструктора
     if text.startswith('{') and text.endswith('}'):
-        # ... (Код обработки JSON) ...
-        pass
+        try:
+            data = json.loads(text)
+            if 'type' in data:  # Проверяем, что это данные конструктора
+                context.user_data['order_data'] = data
+                await update.message.reply_text(
+                    "✅ Данные конструктора получены! Теперь вы можете:\n"
+                    "1. Посмотреть заказ (📄 Мой заказ)\n"
+                    "2. Добавить комментарии (✏️ Добавить пожелания/фото)\n"
+                    "3. Отправить заявку (📞 Отправить телефон)"
+                )
+        except:
+            pass
+    
     elif text == "📄 Мой заказ":
         order = context.user_data.get('order_data')
         if order:
-            await update.message.reply_text(f"🆔 <code>{order.get('id')}</code>\n💰 {order.get('price')} руб.\n💬 {context.user_data.get('user_comment')}", parse_mode=ParseMode.HTML)
-        else: await update.message.reply_text("📭 Пусто")
+            user_comment = context.user_data.get('user_comment', 'Не указаны')
+            await update.message.reply_text(
+                f"🆔 <b>ID заказа:</b> <code>{order.get('id')}</code>\n"
+                f"💰 <b>Стоимость:</b> {order.get('price'):,} руб.\n"
+                f"💬 <b>Пожелания:</b> {user_comment}\n\n"
+                f"Чтобы отправить заявку, нажмите кнопку «📞 Отправить телефон и оформить»",
+                parse_mode=ParseMode.HTML
+            )
+        else: 
+            await update.message.reply_text(
+                "📭 У вас пока нет созданного заказа.\n"
+                "Сначала откройте конструктор и создайте проект навеса.",
+                reply_markup=await get_main_keyboard()
+            )
+    
     elif text == "✏️ Добавить пожелания/фото":
         context.user_data['wait_comment'] = True
-        await update.message.reply_text("✍️ Пишите (или фото):", reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🔙 Отмена")]], resize_keyboard=True))
+        await update.message.reply_text(
+            "✍️ Напишите ваши пожелания или отправьте фотографии:\n\n"
+            "• Фото места установки\n"
+            "• Особые требования к монтажу\n"
+            "• Пожелания по материалам\n"
+            "• Дополнительные комментарии\n\n"
+            "Или просто отправьте текст.",
+            reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🔙 Отмена")]], resize_keyboard=True)
+        )
+    
     elif text == "🔙 Отмена":
         context.user_data['wait_comment'] = False
-        await update.message.reply_text("Отмена.", reply_markup=await get_main_keyboard())
+        await update.message.reply_text("Действие отменено.", reply_markup=await get_main_keyboard())
+    
     elif context.user_data.get('wait_comment'):
         context.user_data['user_comment'] = text
         context.user_data['wait_comment'] = False
-        await update.message.reply_text("✅ Сохранено!", reply_markup=await get_main_keyboard())
+        await update.message.reply_text(
+            "✅ Пожелания сохранены!\n\n"
+            "Теперь вы можете отправить заявку, нажав «📞 Отправить телефон и оформить».",
+            reply_markup=await get_main_keyboard()
+        )
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get('wait_comment'):
-        if 'user_photos' not in context.user_data: context.user_data['user_photos'] = []
+        if 'user_photos' not in context.user_data: 
+            context.user_data['user_photos'] = []
+        
         context.user_data['user_photos'].append(update.message.photo[-1].file_id)
-        if update.message.caption: context.user_data['user_comment'] = update.message.caption
+        
+        if update.message.caption: 
+            context.user_data['user_comment'] = update.message.caption
+        
+        # Если это не медиагруппа или первое фото группы
         if not update.message.media_group_id or context.user_data.get('last_media_group_id') != update.message.media_group_id:
             context.user_data['wait_comment'] = False
-            await update.message.reply_text(f"✅ Фото ({len(context.user_data['user_photos'])}) сохранены!", reply_markup=await get_main_keyboard())
+            await update.message.reply_text(
+                f"✅ Фотографии ({len(context.user_data['user_photos'])}) сохранены!\n\n"
+                "Теперь вы можете отправить заявку, нажав «📞 Отправить телефон и оформить».",
+                reply_markup=await get_main_keyboard()
+            )
+        
         context.user_data['last_media_group_id'] = update.message.media_group_id
 
 async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         data = json.loads(update.effective_message.web_app_data.data)
         context.user_data['order_data'] = data
-        if 'user_comment' not in context.user_data: context.user_data['user_comment'] = 'Нет'
+        
+        if 'user_comment' not in context.user_data: 
+            context.user_data['user_comment'] = 'Нет пожеланий'
         
         await update.message.reply_text(
             format_order_message(data, update.effective_user.first_name, "", "", "", 1, for_admin=False),
             parse_mode=ParseMode.HTML
         )
+        
         await update.message.reply_text(
-            "👇 <b>Для оформления заявки</b> нажмите кнопку «📞 Отправить телефон» внизу.",
+            "✅ <b>Проект создан успешно!</b>\n\n"
+            "Теперь вы можете:\n"
+            "1. Посмотреть детали заказа (📄 Мой заказ)\n"
+            "2. Добавить фото и комментарии (✏️ Добавить пожелания/фото)\n"
+            "3. Отправить заявку менеджеру (📞 Отправить телефон)\n\n"
+            "👇 <b>Для оформления заявки</b> нажмите кнопку «📞 Отправить телефон и оформить» внизу.",
             reply_markup=await get_main_keyboard(),
             parse_mode=ParseMode.HTML
         )
-    except: pass
+    except Exception as e:
+        logger.error(f"Ошибка обработки webapp данных: {e}")
+        await update.message.reply_text(
+            "❌ Произошла ошибка при обработке данных конструктора. Пожалуйста, попробуйте еще раз.",
+            reply_markup=await get_main_keyboard()
+        )
 
 async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await check_subscription(update, context): return
+    if not await check_subscription(update, context): 
+        await ask_subscription(update)
+        return
+    
     user = update.effective_user
     phone = update.message.contact.phone_number
     order = context.user_data.get('order_data')
-    comment = context.user_data.get('user_comment', 'Нет')
+    comment = context.user_data.get('user_comment', 'Нет пожеланий')
     photos = context.user_data.get('user_photos', [])
     
     if not order:
-        await update.message.reply_text("⚠️ Сначала конструктор.")
+        await update.message.reply_text(
+            "⚠️ <b>Сначала создайте проект!</b>\n\n"
+            "Откройте конструктор и создайте проект навеса, прежде чем отправлять заявку.",
+            reply_markup=await get_main_keyboard(),
+            parse_mode=ParseMode.HTML
+        )
         return
 
-    if 'orders' not in context.bot_data: context.bot_data['orders'] = {}
-    if 'users' not in context.bot_data: context.bot_data['users'] = {}
+    if 'orders' not in context.bot_data: 
+        context.bot_data['orders'] = {}
+    if 'users' not in context.bot_data: 
+        context.bot_data['users'] = {}
     
     oid = order.get('id')
     context.bot_data['orders'][oid] = {
         'data': order,
-        'user': {'name': user.first_name, 'phone': phone, 'username': user.username},
+        'user': {
+            'name': user.first_name, 
+            'phone': phone, 
+            'username': user.username,
+            'user_id': user.id
+        },
         'status': 1,
         'comment': comment,
-        'timestamp': datetime.now().isoformat()
+        'timestamp': datetime.now().isoformat(),
+        'photos_count': len(photos)
     }
+    
     context.bot_data['users'][user.id] = f"{user.first_name} (@{user.username}) - {phone}"
 
     user_link = f"@{user.username}" if user.username else "Нет"
@@ -333,30 +543,57 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     try:
         if photos:
+            # Отправляем фото отдельным постом
             media = [InputMediaPhoto(media=pid) for pid in photos]
             await context.bot.send_media_group(chat_id=ADMIN_CHANNEL_ID, media=media)
-            await context.bot.send_message(chat_id=ADMIN_CHANNEL_ID, text=report, parse_mode=ParseMode.HTML)
+            # Отправляем текст заявки
+            await context.bot.send_message(
+                chat_id=ADMIN_CHANNEL_ID, 
+                text=report,
+                parse_mode=ParseMode.HTML
+            )
         else:
-            await context.bot.send_message(chat_id=ADMIN_CHANNEL_ID, text=report, parse_mode=ParseMode.HTML)
-    except Exception as e: logger.error(e)
+            await context.bot.send_message(
+                chat_id=ADMIN_CHANNEL_ID, 
+                text=report,
+                parse_mode=ParseMode.HTML
+            )
+    except Exception as e: 
+        logger.error(f"Ошибка отправки в канал: {e}")
 
-    await update.message.reply_text("✅ <b>Заявка принята!</b>", reply_markup=await get_main_keyboard(), parse_mode=ParseMode.HTML)
+    # Ответ пользователю
+    await update.message.reply_text(
+        "🎉 <b>Заявка успешно отправлена!</b>\n\n"
+        f"🆔 <b>Номер вашей заявки:</b> <code>{oid}</code>\n"
+        "📞 <b>Наш менеджер свяжется с вами в течение 15 минут</b>\n"
+        "⏰ <b>Время работы:</b> Пн-Пт 9:00-20:00, Сб-Вс 10:00-18:00\n\n"
+        "📞 <b>Контакты для связи:</b>\n"
+        "• Телефон: +7 (XXX) XXX-XX-XX\n"
+        "• Email: info@kovka007.ru\n\n"
+        "Спасибо за выбор KOVKA007!",
+        reply_markup=await get_main_keyboard(),
+        parse_mode=ParseMode.HTML
+    )
+    
+    # Очищаем данные пользователя
     context.user_data.clear()
 
 def main():
     persistence = PicklePersistence(filepath="bot_data.pickle")
     app = Application.builder().token(BOT_TOKEN).persistence(persistence).build()
     
-    # Admin
+    # Админ-команды
     app.add_handler(CommandHandler("admin", cmd_help))
     app.add_handler(CommandHandler("clean", cmd_clean))
     app.add_handler(CommandHandler("order", cmd_order_list))
     app.add_handler(CommandHandler("buyer", cmd_buyers))
     app.add_handler(CommandHandler("export", cmd_export))
-    
-    # User
     app.add_handler(CommandHandler("start", start))
+    
+    # Обработчики канала (для админ-панели в канале)
     app.add_handler(MessageHandler(filters.ChatType.CHANNEL, handle_channel_post))
+    
+    # Пользовательские обработчики
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_webapp_data))
     app.add_handler(MessageHandler(filters.CONTACT, handle_contact))
@@ -364,7 +601,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document_upload))
     
-    logger.info("🚀 Bot Started (FULL + CSV)")
+    logger.info("🚀 Бот запущен с подробным приветствием!")
     app.run_polling()
 
 if __name__ == '__main__':
