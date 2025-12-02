@@ -1,12 +1,12 @@
 import os
 import logging
 import json
-import asyncio
 from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, WebAppInfo, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 from keep_alive import keep_alive
 
+# Запуск сервера
 keep_alive()
 
 logging.basicConfig(
@@ -58,13 +58,12 @@ async def get_main_keyboard():
         [KeyboardButton("📞 Отправить телефон и оформить", request_contact=True)]
     ], resize_keyboard=True)
 
-# === ОБРАБОТКА ЗАКАЗА (ФОРМАТИРОВАНИЕ) ===
+# === ФОРМАТИРОВАНИЕ ЗАКАЗА ===
 def format_order_message(order, user, phone, comment, status_code=1):
     rtype = ROOF_TYPES.get(order.get('type'), order.get('type'))
     mat = MATERIALS.get(order.get('material'), order.get('material'))
     paint = PAINTS.get(order.get('paint'), order.get('paint'))
     
-    # Опции
     opts = order.get('opts', {})
     opt_list = []
     if opts.get('trusses'): opt_list.append("✅ Усил. фермы")
@@ -121,7 +120,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         data = json.loads(update.effective_message.web_app_data.data)
-        # Нормализация данных
         order_data = {
             'id': data.get('id'),
             'type': data.get('type') or data.get('t'),
@@ -151,28 +149,25 @@ async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_subscription(update, context): return
-    text = update.message.text
+    text = update.message.text.strip()
     
-    # --- ЛОГИКА АДМИНА ---
+    # Админ-команды в чате (без /)
     user_id = update.effective_user.id
     if user_id in ADMIN_IDS:
-        # Смена статуса
+        # Смена статуса цифрой
         if text in ['1', '2', '3']:
             edit_id = context.user_data.get('admin_edit_order')
             if edit_id:
                 orders = context.bot_data.get('orders', {})
                 if edit_id in orders:
                     orders[edit_id]['status'] = int(text)
-                    await update.message.reply_text(f"✅ Статус заказа {edit_id} изменен на: <b>{STATUS_MAP[int(text)]}</b>", parse_mode=ParseMode.HTML)
-                    
-                    # Если есть ID сообщения в канале, можно попробовать отредактировать (сложно без базы)
-                    # Поэтому просто пишем в админку
+                    await update.message.reply_text(f"✅ Статус {edit_id} -> <b>{STATUS_MAP[int(text)]}</b>", parse_mode=ParseMode.HTML)
                     return
             else:
-                await update.message.reply_text("⚠️ Сначала выберите заказ командой /order ID")
+                await update.message.reply_text("⚠️ Сначала выберите заказ: /order ID")
                 return
 
-    # --- ЛОГИКА ПОЛЬЗОВАТЕЛЯ ---
+    # Пользовательские кнопки
     if text == "📄 Мой заказ":
         order = context.user_data.get('order_data')
         if not order:
@@ -214,25 +209,20 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Соберите навес в конструкторе.")
         return
 
-    # Сохраняем в базу бота (в памяти)
     if 'orders' not in context.bot_data: context.bot_data['orders'] = {}
     if 'users' not in context.bot_data: context.bot_data['users'] = {}
 
-    # Сохраняем заказ
     order_id = order.get('id')
     full_order_info = {
         'data': order,
         'user': {'id': user.id, 'name': user.first_name, 'username': user.username, 'phone': phone},
         'comment': comment,
-        'status': 1, # 1 - Ожидает
+        'status': 1,
         'timestamp': update.message.date.isoformat()
     }
     context.bot_data['orders'][order_id] = full_order_info
-    
-    # Сохраняем юзера
     context.bot_data['users'][user.id] = f"{user.first_name} (@{user.username}) - {phone}"
 
-    # Отчет
     report = format_order_message(order, user, phone, comment, 1)
     
     try:
@@ -247,9 +237,25 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # === АДМИН КОМАНДЫ ===
 
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает список команд админа"""
+    if update.effective_user.id not in ADMIN_IDS: return
+    
+    help_text = (
+        "👮‍♂️ <b>КОМАНДЫ АДМИНИСТРАТОРА:</b>\n\n"
+        "🔹 <code>/order</code> - Список последних 10 заказов\n"
+        "🔹 <code>/order clean</code> - Очистить базу заказов\n"
+        "🔹 <code>/order ID</code> - Выбрать заказ для редактирования\n"
+        "🔹 <code>/buyer</code> - Список всех клиентов\n"
+        "🔹 <code>/clean</code> - Удалить последние 50 сообщений бота\n\n"
+        "<i>Чтобы изменить статус заказа, сначала выберите его через /order ID, а затем отправьте цифру:</i>\n"
+        "1️⃣ Ожидает\n2️⃣ В работе\n3️⃣ Сдан"
+    )
+    await update.message.reply_text(help_text, parse_mode=ParseMode.HTML)
+
 async def cmd_clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS: return
-    await update.message.reply_text("🗑 Удаляю последние 50 сообщений...")
+    await update.message.reply_text("🗑 Чищу чат...")
     try:
         msg_id = update.message.message_id
         for i in range(50):
@@ -265,10 +271,9 @@ async def cmd_order_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if args and args[0] == 'clean':
         context.bot_data['orders'] = {}
-        await update.message.reply_text("🗑 Список заказов очищен.")
+        await update.message.reply_text("🗑 База заказов очищена.")
         return
 
-    # Если передан ID заказа (/order CFG-123)
     if args:
         oid = args[0]
         if oid in orders:
@@ -288,13 +293,12 @@ async def cmd_order_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Заказ не найден.")
         return
 
-    # Иначе список
     if not orders:
         await update.message.reply_text("📭 Заказов нет.")
         return
         
     msg = "📂 <b>АКТИВНЫЕ ЗАЯВКИ:</b>\n\n"
-    for oid, info in list(orders.items())[-10:]: # Последние 10
+    for oid, info in list(orders.items())[-10:]:
         icon = "🟡" if info['status'] == 1 else "🔵" if info['status'] == 2 else "🟢"
         msg += f"{icon} <code>{oid}</code> | {info['user']['name']} | {info['data']['price']:,}\n"
     
@@ -307,11 +311,10 @@ async def cmd_buyers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📭 База пуста.")
         return
     
-    msg = "👥 <b>СПИСОК ПОКУПАТЕЛЕЙ:</b>\n\n"
+    msg = "👥 <b>КЛИЕНТЫ:</b>\n\n"
     for uid, info in users.items():
         msg += f"👤 {info}\n"
         
-    # Разбиваем, если сообщение слишком длинное
     if len(msg) > 4000: msg = msg[:4000] + "..."
     await update.message.reply_text(msg)
 
@@ -320,6 +323,7 @@ def main():
     
     # Команды
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("admin", cmd_help)) # /admin вызывает справку
     app.add_handler(CommandHandler("clean", cmd_clean))
     app.add_handler(CommandHandler("order", cmd_order_list))
     app.add_handler(CommandHandler("buyer", cmd_buyers))
@@ -329,10 +333,9 @@ def main():
     app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_webapp_data))
     app.add_handler(MessageHandler(filters.CONTACT, handle_contact))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    # Текст (меню и админка)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu))
     
-    logger.info("🚀 Бот запущен (ADMIN TOOLS)")
+    logger.info("🚀 Бот запущен (FINAL)")
     app.run_polling()
 
 if __name__ == '__main__':
