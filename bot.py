@@ -66,14 +66,35 @@ async def start_http_server(port, application=None):
     app.router.add_get('/health', handle_health_check)
     app.router.add_get('/ping', handle_health_check)
 
+    def cors_headers(origin):
+        """Возвращает CORS заголовки для разрешённого origin"""
+        return {
+            'Access-Control-Allow-Origin': origin or '*',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type',
+        }
+
+    async def handle_options(request):
+        """Обработчик preflight OPTIONS запросов"""
+        origin = request.headers.get('origin', '')
+        allowed = os.getenv('ALLOWED_ORIGINS', 'https://kovka007.vercel.app')
+        allowed_list = [o.strip() for o in allowed.split(',') if o.strip()]
+        if not origin or origin in allowed_list:
+            return web.Response(status=200, headers=cors_headers(origin))
+        return web.Response(status=403, text='Forbidden')
+
+    app.router.add_options('/submit_order', handle_options)
+
     async def handle_submit_order(request):
         try:
             origin = request.headers.get('origin', '')
-            allowed = os.getenv('ALLOWED_ORIGINS', 'https://kovka007.vercel.app')
+            allowed = os.getenv('ALLOWED_ORIGINS', 'https://kovka007.vercel.app,http://localhost:5173,http://localhost:3000')
             allowed_list = [o.strip() for o in allowed.split(',') if o.strip()]
+            headers = cors_headers(origin) if (not origin or origin in allowed_list) else {}
+            
             if origin and origin not in allowed_list:
                 logger.warning(f"Rejected order from origin: {origin}")
-                return web.Response(status=403, text='Forbidden')
+                return web.Response(status=403, text='Forbidden', headers=headers)
 
             data = await request.json()
             logger.info(f"📨 Received browser order via HTTP endpoint: id={data.get('id')}")
@@ -101,10 +122,10 @@ async def start_http_server(port, application=None):
             else:
                 logger.warning("No telegram application available to forward order")
 
-            return web.json_response({'ok': True})
+            return web.json_response({'ok': True}, headers=headers)
         except Exception as e:
             logger.error(f"Exception in submit_order handler: {e}", exc_info=True)
-            return web.json_response({'ok': False, 'error': str(e)}, status=500)
+            return web.json_response({'ok': False, 'error': str(e)}, status=500, headers=cors_headers(request.headers.get('origin', '')))
 
     app.router.add_post('/submit_order', handle_submit_order)
 
