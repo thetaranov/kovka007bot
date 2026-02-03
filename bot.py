@@ -75,7 +75,10 @@ async def start_http_server(port):
 
 class WebAppDataFilter(filters.MessageFilter):
     def filter(self, message) -> bool:
-        return bool(getattr(message, "web_app_data", None))
+        has_web_app = bool(getattr(message, "web_app_data", None))
+        if has_web_app:
+            logger.info(f"✅ WebApp data detected from user {message.from_user.id}")
+        return has_web_app
 
 async def get_main_keyboard():
     web_app_url = "https://kovka007.vercel.app"
@@ -554,8 +557,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         if not update.effective_message or not update.effective_message.web_app_data:
+            logger.warning("⚠️ No WebApp data in message")
             return
-        data = json.loads(update.effective_message.web_app_data.data)
+        
+        data_raw = update.effective_message.web_app_data.data
+        logger.info(f"📨 Received WebApp data ({len(data_raw)} bytes) from {update.effective_user.id}")
+        
+        data = json.loads(data_raw)
         context.user_data['order_data'] = data
 
         if 'user_comment' not in context.user_data: 
@@ -576,12 +584,13 @@ async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE)
             reply_markup=await get_main_keyboard(),
             parse_mode=ParseMode.HTML
         )
+        logger.info(f"✅ Order processed for user {update.effective_user.id}")
+    except json.JSONDecodeError as e:
+        logger.error(f"❌ JSON parse error: {e}")
+        await update.message.reply_text("❌ Ошибка парсинга данных конструктора.")
     except Exception as e:
-        logger.error(f"Ошибка обработки webapp данных: {e}")
-        await update.message.reply_text(
-            "❌ Произошла ошибка при обработке данных конструктора. Пожалуйста, попробуйте еще раз.",
-            reply_markup=await get_main_keyboard()
-        )
+        logger.error(f"❌ WebApp handler error: {e}", exc_info=True)
+        await update.message.reply_text(f"❌ Ошибка обработки: {str(e)[:100]}")
 
 async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_subscription(update, context):
