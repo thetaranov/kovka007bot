@@ -692,7 +692,7 @@ async def main():
 
     # Пользовательские обработчики
     application.add_handler(CallbackQueryHandler(handle_callback))
-    application.add_handler(MessageHandler(filters.ALL, handle_webapp_data))
+    application.add_handler(MessageHandler(filters.ALL, handle_webapp_data, block=False))
     application.add_handler(MessageHandler(filters.CONTACT, handle_contact))
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu))
