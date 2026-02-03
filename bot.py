@@ -43,6 +43,14 @@ ROOF_TYPES = {'single': 'Односкатный', 'gable': 'Двускатный
 MATERIALS = {'polycarbonate': 'Сотовый поликарбонат', 'metaltile': 'Металлочерепица', 'decking': 'Профнастил'}
 PAINTS = {'none': 'Грунт-эмаль', 'ral': 'Эмаль RAL', 'polymer': 'Полимерно-порошковая'}
 STATUS_MAP = {1: "🟡 Ожидает", 2: "🔵 В работе", 3: "🟢 Сдан"}
+GATE_TYPES = {'none': 'Нет', 'sliding': 'Откатные', 'swing': 'Распашные', 'hinged': 'Навесные'}
+GATE_FILLINGS = {
+    'lattice': 'Решетка',
+    'solid': 'Сплошное',
+    'forged': 'Ковка',
+    'combined': 'Комби',
+    'vertical': 'Вертик. планки'
+}
 
 # === HTTP СЕРВЕР ДЛЯ HEALTH CHECKS ===
 async def handle_health_check(request):
@@ -111,6 +119,48 @@ def format_order_message(order, user_name, user_link, phone, comment, status_cod
         f"💬 <b>Пожелания:</b> {comment}\n"
     ) if for_admin else ""
 
+    # Нагрузки (если есть)
+    loads = order.get('loads', {})
+    loads_str = ""
+    if loads:
+        loads_str = (
+            f"➖➖➖➖➖➖➖➖➖➖\n"
+            f"❄️ <b>Снеговая:</b> {loads.get('snow', 0)} кг/м²\n"
+            f"💨 <b>Ветровая:</b> {loads.get('wind', 0)} Па\n"
+            f"⚖️ <b>Общая:</b> {loads.get('total', 0)} кг/м²\n"
+            f"📍 <b>Регион:</b> {order.get('region', 'Не указан')}\n"
+        )
+
+    # Ворота (если есть)
+    gate = order.get('gate', {})
+    gate_str = ""
+    if gate and gate.get('type') and gate.get('type') != 'none':
+        gate_type = GATE_TYPES.get(gate.get('type'), gate.get('type'))
+        gate_filling = GATE_FILLINGS.get(gate.get('filling'), gate.get('filling'))
+        gate_frame_color = gate.get('frameColor') or gate.get('frame_color') or 'Не указан'
+        gate_panel_color = gate.get('panelColor') or gate.get('panel_color') or 'Не указан'
+        gate_str = (
+            f"➖➖➖➖➖➖➖➖➖➖\n"
+            f"🚗 <b>ВОРОТА:</b>\n"
+            f"📐 <b>Тип:</b> {gate_type}\n"
+            f"📏 <b>Размер:</b> {gate.get('width', 4)}×{gate.get('height', 2)} м\n"
+            f"🔲 <b>Заполнение:</b> {gate_filling}\n"
+            f"🎨 <b>Цвет рамы:</b> {gate_frame_color}\n"
+            f"🎨 <b>Цвет полотна:</b> {gate_panel_color}\n"
+            f"{'🚶 Калитка: Да' if gate.get('wicket') else '🚶 Калитка: Нет'}\n"
+            f"{'🤖 Автоматика: Да' if gate.get('automation') else '🤖 Автоматика: Нет'}\n"
+        )
+
+    # Цены
+    price_navyes = order.get('price', 0)
+    price_gate = order.get('price_gate', 0)
+    price_total = order.get('price_total', price_navyes + price_gate)
+    
+    price_str = f"💰 <b>НАВЕС: {price_navyes:,} руб.</b>"
+    if price_gate > 0:
+        price_str += f"\n🚗 <b>ВОРОТА: {price_gate:,} руб.</b>"
+        price_str += f"\n💵 <b>ИТОГО: {price_total:,} руб.</b>"
+
     return (
         f"{header}\n"
         f"➖➖➖➖➖➖➖➖➖➖\n"
@@ -131,8 +181,10 @@ def format_order_message(order, user_name, user_link, phone, comment, status_cod
         f"🖌 <b>Цвет:</b> {order.get('color_frame')} / {order.get('color_roof')}\n"
         f"➖➖➖➖➖➖➖➖➖➖\n"
         f"🛠 <b>Опции:</b>\n{opt_str}\n"
+        f"{loads_str}"
+        f"{gate_str}"
         f"➖➖➖➖➖➖➖➖➖➖\n"
-        f"💰 <b>ИТОГО: {order.get('price', 0):,} руб.</b>"
+        f"{price_str}"
     )
 
 # === КОРОТКОЕ ПРИВЕТСТВИЕ ===
