@@ -78,7 +78,8 @@ async def get_main_keyboard():
     return ReplyKeyboardMarkup([
         [KeyboardButton("🏗 Открыть конструктор", web_app=WebAppInfo(url=web_app_url))],
         [KeyboardButton("📄 Мой заказ"), KeyboardButton("✏️ Добавить пожелания/фото")],
-        [KeyboardButton("📚 Как пользоваться"), KeyboardButton("📞 Отправить телефон и оформить", request_contact=True)]
+        [KeyboardButton("📚 Как пользоваться"), KeyboardButton("🔒 Политика и соглашение")],
+        [KeyboardButton("📞 Отправить телефон и оформить", request_contact=True)]
     ], resize_keyboard=True)
 
 async def check_subscription(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -279,6 +280,26 @@ async def show_instruction(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=await get_main_keyboard()
     )
 
+# === ПОЛИТИКА КОНФИДЕНЦИАЛЬНОСТИ И ПОЛЬЗОВАТЕЛЬСКОЕ СОГЛАШЕНИЕ ===
+
+async def show_privacy_terms(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    policy_text = (
+        "🔒 <b>Политика конфиденциальности</b>\n"
+        "Мы собираем только данные, необходимые для расчета и оформления заявки: "
+        "параметры проекта, контактный телефон, имя, комментарии и прикрепленные файлы.\n"
+        "Данные используются для связи с вами, подготовки коммерческого предложения "
+        "и улучшения сервиса. Мы не продаем данные третьим лицам. "
+        "Передача возможна только подрядчикам, участвующим в выполнении заявки.\n"
+        "Вы можете запросить удаление или корректировку данных, написав в поддержку.\n\n"
+        "📝 <b>Пользовательское соглашение</b>\n"
+        "Сервис предоставляет расчет ориентировочной стоимости и возможность отправки заявки. "
+        "Итоговые условия и цена согласуются менеджером после уточнения деталей.\n"
+        "Пользователь подтверждает корректность введенных данных и согласие на связь. "
+        "Материалы (тексты, изображения) сервиса защищены авторским правом.\n\n"
+        "📩 <b>Контакты</b>: +7 (927) 799-11-55, https://kovka007.ru"
+    )
+    await update.message.reply_text(policy_text, parse_mode=ParseMode.HTML)
+
 # === АДМИН-ПАНЕЛЬ ===
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -292,12 +313,9 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔹 <code>/order clean</code> - Очистить базу заказов\n"
         "🔹 <code>/order ID</code> - Перейти к заказу\n"
         "🔹 <code>/buyer</code> - Список клиентов\n"
-        "🔹 <code>/clean</code> - Удалить последние 50 сообщений\n\n"
-        "📂 <b>База данных (Экспорт):</b>\n"
-        "🔹 <code>/export</code> - Скачать базу заказов (CSV)\n\n"
-        "📥 <b>Импорт:</b>\n"
-        "Отправьте .json файл с подписью:\n"
-        "<code>/import_db</code> - Загрузить базу заказов"
+        "🔹 <code>/export</code> - Экспорт базы\n"
+        "🔹 <code>/clean</code> - Очистить чат\n"
+        "🔹 <code>/import_db</code> - Загрузить базу заказов"
     )
     await msg.reply_text(text, parse_mode=ParseMode.HTML)
 
@@ -329,7 +347,6 @@ async def cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_document_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS: return
-
     if update.message.caption == "/import_db":
         file = await update.message.document.get_file()
         content = await file.download_as_bytearray()
@@ -481,6 +498,9 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif text == "📚 Как пользоваться":
         await show_instruction(update, context)
+
+    elif text == "🔒 Политика и соглашение":
+        await show_privacy_terms(update, context)
 
     elif text == "🔙 Отмена":
         context.user_data['wait_comment'] = False
