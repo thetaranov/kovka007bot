@@ -538,6 +538,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
+        if not update.effective_message or not update.effective_message.web_app_data:
+            return
         data = json.loads(update.effective_message.web_app_data.data)
         context.user_data['order_data'] = data
 
@@ -679,7 +681,7 @@ async def main():
 
     # Пользовательские обработчики
     application.add_handler(CallbackQueryHandler(handle_callback))
-    application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_webapp_data))
+    application.add_handler(MessageHandler(filters.ALL, handle_webapp_data))
     application.add_handler(MessageHandler(filters.CONTACT, handle_contact))
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu))
