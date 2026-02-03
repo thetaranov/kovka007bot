@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 PORT = int(os.getenv('PORT', 8080))  # Render автоматически устанавливает PORT
 ADMIN_CHANNEL_ID = -1003250531931
+ADMIN_USER_ID = 5216818742
 INFO_CHANNEL_ID = -1003461235309
 INFO_CHANNEL_LINK = "https://t.me/taranov_public"
 ADMIN_IDS = [7746957973, 5216818742] 
@@ -112,11 +113,11 @@ async def start_http_server(port, application=None):
                 logger.error(f"Error formatting order message: {e}")
                 msg = f"Новая заявка (не удалось распарсить): {json.dumps(data)[:400]}"
 
-            # Send to admin channel
+            # Send to admin user directly
             if application and application.bot:
                 try:
-                    await application.bot.send_message(chat_id=ADMIN_CHANNEL_ID, text=msg, parse_mode=ParseMode.HTML)
-                    logger.info("✅ Sent browser order to admin channel")
+                    await application.bot.send_message(chat_id=ADMIN_USER_ID, text=msg, parse_mode=ParseMode.HTML)
+                    logger.info("✅ Sent browser order to admin user")
                 except Exception as e:
                     logger.error(f"Failed to send order to admin: {e}")
             else:
