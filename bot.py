@@ -73,6 +73,10 @@ async def start_http_server(port):
 
 # === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
 
+class WebAppDataFilter(filters.MessageFilter):
+    def filter(self, message) -> bool:
+        return bool(getattr(message, "web_app_data", None))
+
 async def get_main_keyboard():
     web_app_url = "https://kovka007.vercel.app"
     return ReplyKeyboardMarkup([
@@ -692,7 +696,7 @@ async def main():
 
     # Пользовательские обработчики
     application.add_handler(CallbackQueryHandler(handle_callback))
-    application.add_handler(MessageHandler(filters.ALL, handle_webapp_data, block=False))
+    application.add_handler(MessageHandler(WebAppDataFilter(), handle_webapp_data))
     application.add_handler(MessageHandler(filters.CONTACT, handle_contact))
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu))
