@@ -57,12 +57,56 @@ async def handle_health_check(request):
     """Обработчик health check для Render"""
     return web.Response(text="✅ Bot is alive")
 
-async def start_http_server(port):
-    """Запуск HTTP сервера на указанном порту для Render"""
+async def start_http_server(port, application=None):
+    """Запуск HTTP сервера на указанном порту для Render.
+    Если передан объект telegram Application, добавляется endpoint для приёма заказов из браузера.
+    """
     app = web.Application()
     app.router.add_get('/', handle_health_check)
     app.router.add_get('/health', handle_health_check)
     app.router.add_get('/ping', handle_health_check)
+
+    async def handle_submit_order(request):
+        try:
+            origin = request.headers.get('origin', '')
+            allowed = os.getenv('ALLOWED_ORIGINS', 'https://kovka007.vercel.app')
+            allowed_list = [o.strip() for o in allowed.split(',') if o.strip()]
+            if origin and origin not in allowed_list:
+                logger.warning(f"Rejected order from origin: {origin}")
+                return web.Response(status=403, text='Forbidden')
+
+            data = await request.json()
+            logger.info(f"📨 Received browser order via HTTP endpoint: id={data.get('id')}")
+
+            # Extract contact fields if provided
+            customer_name = data.get('name') or data.get('customer') or 'Браузерный пользователь'
+            customer_phone = data.get('phone') or 'Не указан'
+            comment = data.get('comment') or data.get('user_comment') or 'Нет пожеланий'
+
+            # Format message using existing helper
+            try:
+                order_payload = data
+                msg = format_order_message(order_payload, customer_name, '', customer_phone, comment, 1, for_admin=True)
+            except Exception as e:
+                logger.error(f"Error formatting order message: {e}")
+                msg = f"Новая заявка (не удалось распарсить): {json.dumps(data)[:400]}"
+
+            # Send to admin channel
+            if application and application.bot:
+                try:
+                    await application.bot.send_message(chat_id=ADMIN_CHANNEL_ID, text=msg, parse_mode=ParseMode.HTML)
+                    logger.info("✅ Sent browser order to admin channel")
+                except Exception as e:
+                    logger.error(f"Failed to send order to admin: {e}")
+            else:
+                logger.warning("No telegram application available to forward order")
+
+            return web.json_response({'ok': True})
+        except Exception as e:
+            logger.error(f"Exception in submit_order handler: {e}", exc_info=True)
+            return web.json_response({'ok': False, 'error': str(e)}, status=500)
+
+    app.router.add_post('/submit_order', handle_submit_order)
 
     runner = web.AppRunner(app)
     await runner.setup()
@@ -711,8 +755,8 @@ async def main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu))
     application.add_handler(MessageHandler(filters.Document.ALL, handle_document_upload))
 
-    # Запускаем HTTP сервер для health checks на порту от Render
-    http_runner = await start_http_server(PORT)
+    # Запускаем HTTP сервер для health checks и endpoint'ов на порту от Render
+    http_runner = await start_http_server(PORT, application)
 
     try:
         # Запускаем бота
