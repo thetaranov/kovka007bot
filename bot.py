@@ -429,11 +429,22 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
 # === ПОЛЬЗОВАТЕЛЬСКИЕ ХЕНДЛЕРЫ ===
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.callback_query.data == "check_sub":
+    if not update.callback_query:
+        return
+
+    data = update.callback_query.data
+    await update.callback_query.answer()
+
+    if data == "check_sub":
         if await check_subscription(update, context):
-            await update.callback_query.message.delete()
+            try:
+                if update.callback_query.message:
+                    await update.callback_query.message.delete()
+            except Exception as e:
+                logger.error(f"Ошибка удаления сообщения: {e}")
             await start(update, context)
-        else: await update.callback_query.answer("Нет подписки!", show_alert=True)
+        else:
+            await update.callback_query.answer("Нет подписки!", show_alert=True)
 
 async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_subscription(update, context): 
