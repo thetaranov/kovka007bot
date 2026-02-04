@@ -106,23 +106,32 @@ async def start_http_server(port, application=None):
             # Extract contact fields if provided
             customer_name = data.get('name') or data.get('customer') or 'Браузерный пользователь'
             customer_phone = data.get('phone') or 'Не указан'
-            comment = data.get('comment') or data.get('user_comment') or 'Нет пожеланий'
+            comment = data.get('comment') or data.get('user_comment') or ''
 
             # Format message using existing helper
             try:
                 order_payload = data
                 msg = format_order_message(order_payload, customer_name, '', customer_phone, comment, 1, for_admin=True)
+                # Добавляем пометку что заявка из браузера
+                msg = "🌐 <b>ЗАЯВКА ИЗ БРАУЗЕРА</b>\n\n" + msg
             except Exception as e:
                 logger.error(f"Error formatting order message: {e}")
-                msg = f"Новая заявка (не удалось распарсить): {json.dumps(data)[:400]}"
+                msg = f"🌐 <b>ЗАЯВКА ИЗ БРАУЗЕРА</b>\n\nНовая заявка (не удалось распарсить):\n{json.dumps(data, ensure_ascii=False)[:400]}"
 
-            # Send to admin user directly
+            # Send to admin channel AND admin user
             if application and application.bot:
                 try:
-                    await application.bot.send_message(chat_id=ADMIN_USER_ID, text=msg, parse_mode=ParseMode.HTML)
-                    logger.info("✅ Sent browser order to admin user")
+                    # Отправляем в админ канал
+                    await application.bot.send_message(chat_id=ADMIN_CHANNEL_ID, text=msg, parse_mode=ParseMode.HTML)
+                    logger.info(f"✅ Sent browser order to admin channel {ADMIN_CHANNEL_ID}")
                 except Exception as e:
-                    logger.error(f"Failed to send order to admin: {e}")
+                    logger.error(f"Failed to send order to admin channel: {e}")
+                    # Fallback: отправляем лично админу
+                    try:
+                        await application.bot.send_message(chat_id=ADMIN_USER_ID, text=msg, parse_mode=ParseMode.HTML)
+                        logger.info(f"✅ Sent browser order to admin user {ADMIN_USER_ID} (fallback)")
+                    except Exception as e2:
+                        logger.error(f"Failed to send order to admin user: {e2}")
             else:
                 logger.warning("No telegram application available to forward order")
 
