@@ -72,16 +72,20 @@ async def start_http_server(port, application=None):
         return {
             'Access-Control-Allow-Origin': origin or '*',
             'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type',
+            'Access-Control-Allow-Headers': 'Content-Type, X-CSRF-Token',
         }
+
+    # Общий список разрешённых origins
+    def get_allowed_origins():
+        return os.getenv('ALLOWED_ORIGINS', 'https://kovka007.vercel.app,http://localhost:5173,http://localhost:3000,http://localhost:4173')
 
     async def handle_options(request):
         """Обработчик preflight OPTIONS запросов"""
         origin = request.headers.get('origin', '')
-        allowed = os.getenv('ALLOWED_ORIGINS', 'https://kovka007.vercel.app')
-        allowed_list = [o.strip() for o in allowed.split(',') if o.strip()]
+        allowed_list = [o.strip() for o in get_allowed_origins().split(',') if o.strip()]
         if not origin or origin in allowed_list:
             return web.Response(status=200, headers=cors_headers(origin))
+        logger.warning(f"CORS preflight rejected for origin: {origin}")
         return web.Response(status=403, text='Forbidden')
 
     app.router.add_options('/submit_order', handle_options)
@@ -89,8 +93,7 @@ async def start_http_server(port, application=None):
     async def handle_submit_order(request):
         try:
             origin = request.headers.get('origin', '')
-            allowed = os.getenv('ALLOWED_ORIGINS', 'https://kovka007.vercel.app,http://localhost:5173,http://localhost:3000')
-            allowed_list = [o.strip() for o in allowed.split(',') if o.strip()]
+            allowed_list = [o.strip() for o in get_allowed_origins().split(',') if o.strip()]
             headers = cors_headers(origin) if (not origin or origin in allowed_list) else {}
             
             if origin and origin not in allowed_list:
