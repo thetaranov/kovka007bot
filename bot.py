@@ -75,6 +75,7 @@ async def send_order_with_photo(bot, chat_id: str | int, msg: str, screenshot_b6
     """Отправить заказ с фото или без"""
     photo_bytes = decode_screenshot(screenshot_b64) if screenshot_b64 else None
     if photo_bytes:
+        logger.info(f"📸 Sending photo ({len(photo_bytes)} bytes) to chat {chat_id}")
         try:
             photo_io = io.BytesIO(photo_bytes)
             photo_io.name = 'scene.jpg'
@@ -84,7 +85,9 @@ async def send_order_with_photo(bot, chat_id: str | int, msg: str, screenshot_b6
                 await bot.send_message(chat_id=chat_id, text=msg, parse_mode=ParseMode.HTML)
             return True
         except Exception as e:
-            logger.error(f"Failed to send photo to {chat_id}: {e}")
+            logger.error(f"Failed to send photo to {chat_id}: {e}", exc_info=True)
+    else:
+        logger.warning(f"⚠️ No photo to send (screenshot_b64={'present' if screenshot_b64 else 'None'}, decode={'ok' if photo_bytes else 'failed'})")
     # Fallback: отправляем только текст
     await bot.send_message(chat_id=chat_id, text=msg, parse_mode=ParseMode.HTML)
     return False
@@ -112,7 +115,7 @@ async def start_http_server(port, application=None):
     """Запуск HTTP сервера на указанном порту для Render.
     Если передан объект telegram Application, добавляется endpoint для приёма заказов из браузера.
     """
-    app = web.Application()
+    app = web.Application(client_max_size=10 * 1024 * 1024)  # 10MB для скриншотов
     app.router.add_get('/', handle_health_check)
     app.router.add_get('/health', handle_health_check)
     app.router.add_get('/ping', handle_health_check)
@@ -156,9 +159,13 @@ async def start_http_server(port, application=None):
 
             # Извлекаем скриншот из payload (если есть)
             screenshot_b64 = data.pop('screenshot', None)
+            if screenshot_b64:
+                logger.info(f"📸 Screenshot received in payload ({len(screenshot_b64)} chars)")
             # Также проверяем хранилище скриншотов (для Telegram WebApp заказов)
             if not screenshot_b64 and data.get('id'):
                 screenshot_b64 = get_screenshot(data['id'])
+                if screenshot_b64:
+                    logger.info(f"📸 Screenshot found in store for {data['id']}")
 
             # Extract contact fields if provided
             customer_name = data.get('name') or data.get('customer') or 'Браузерный пользователь'
@@ -264,19 +271,8 @@ async def ask_subscription(update: Update):
     await update.message.reply_text("🚫 <b>Доступ ограничен!</b>\nПодпишитесь на канал.", reply_markup=InlineKeyboardMarkup(kb), parse_mode=ParseMode.HTML)
 
 def format_order_message(order, user_name, user_link, phone, comment, status_code=1, for_admin=True):
-    rtype = ROOF_TYPES.get(order.get('type'), order.get('type'))
-    mat = MATERIALS.get(order.get('material'), order.get('material'))
-    paint = PAINTS.get(order.get('paint'), order.get('paint'))
-
-    opts = order.get('opts', {})
-    opt_list = []
-    if opts.get('trusses'): opt_list.append("✅ Усил. фермы")
-    if opts.get('gutters'): opt_list.append("✅ Водостоки")
-    if opts.get('walls'): opt_list.append("✅ Зашивка")
-    if opts.get('found'): opt_list.append("✅ Фундамент")
-    if opts.get('install'): opt_list.append("✅ Монтаж")
-    opt_str = "\n".join(opt_list) if opt_list else "Базовая"
-
+    only_gates = order.get('only_gates', False)
+    
     header = f"🚨 <b>НОВАЯ ЗАЯВКА!</b>\nСтатус: {STATUS_MAP.get(status_code, '?')}" if for_admin else "📋 <b>ВАШ ЗАКАЗ:</b>"
 
     user_info = (
@@ -286,16 +282,51 @@ def format_order_message(order, user_name, user_link, phone, comment, status_cod
         f"💬 <b>Пожелания:</b> {comment}\n"
     ) if for_admin else ""
 
-    # Нагрузки (если есть)
-    loads = order.get('loads', {})
-    loads_str = ""
-    if loads:
-        loads_str = (
+    # Данные навеса — только если НЕ режим "только ворота"
+    carport_str = ""
+    if not only_gates:
+        rtype = ROOF_TYPES.get(order.get('type'), order.get('type'))
+        mat = MATERIALS.get(order.get('material'), order.get('material'))
+        paint = PAINTS.get(order.get('paint'), order.get('paint'))
+
+        opts = order.get('opts', {})
+        opt_list = []
+        if opts.get('trusses'): opt_list.append("✅ Усил. фермы")
+        if opts.get('gutters'): opt_list.append("✅ Водостоки")
+        if opts.get('walls'): opt_list.append("✅ Зашивка")
+        if opts.get('found'): opt_list.append("✅ Фундамент")
+        if opts.get('install'): opt_list.append("✅ Монтаж")
+        opt_str = "\n".join(opt_list) if opt_list else "Базовая"
+
+        # Нагрузки (если есть)
+        loads = order.get('loads', {})
+        loads_str = ""
+        if loads:
+            loads_str = (
+                f"➖➖➖➖➖➖➖➖➖➖\n"
+                f"❄️ <b>Снеговая:</b> {loads.get('snow', 0)} кг/м²\n"
+                f"💨 <b>Ветровая:</b> {loads.get('wind', 0)} Па\n"
+                f"⚖️ <b>Общая:</b> {loads.get('total', 0)} кг/м²\n"
+                f"📍 <b>Регион:</b> {order.get('region', 'Не указан')}\n"
+            )
+
+        carport_str = (
+            f"🏗 <b>Тип:</b> {rtype}\n"
+            f"📏 <b>Длина:</b> {order.get('length')} м\n"
+            f"📏 <b>Ширина:</b> {order.get('width')} м\n"
+            f"↕️ <b>Высота (столб):</b> {order.get('height')} м\n"
+            f"🏔 <b>Высота (общ):</b> ~{order.get('height_peak')} м\n"
+            f"📐 <b>Уклон:</b> {order.get('slope')}°\n"
+            f"🧱 <b>Сечение:</b> {order.get('pillar')}\n"
             f"➖➖➖➖➖➖➖➖➖➖\n"
-            f"❄️ <b>Снеговая:</b> {loads.get('snow', 0)} кг/м²\n"
-            f"💨 <b>Ветровая:</b> {loads.get('wind', 0)} Па\n"
-            f"⚖️ <b>Общая:</b> {loads.get('total', 0)} кг/м²\n"
-            f"📍 <b>Регион:</b> {order.get('region', 'Не указан')}\n"
+            f"🔲 <b>S пола:</b> {order.get('area_floor')} м²\n"
+            f"🏠 <b>S кровли:</b> {order.get('area_roof')} м²\n"
+            f"🏠 <b>Материал:</b> {mat}\n"
+            f"🎨 <b>Покраска:</b> {paint}\n"
+            f"🖌 <b>Цвет:</b> {order.get('color_frame')} / {order.get('color_roof')}\n"
+            f"➖➖➖➖➖➖➖➖➖➖\n"
+            f"🛠 <b>Опции:</b>\n{opt_str}\n"
+            f"{loads_str}"
         )
 
     # Ворота (если есть)
@@ -322,7 +353,6 @@ def format_order_message(order, user_name, user_link, phone, comment, status_cod
     price_navyes = order.get('price', 0)
     price_gate = order.get('price_gate', 0)
     price_total = order.get('price_total', price_navyes + price_gate)
-    only_gates = order.get('only_gates', False)
     
     if only_gates:
         price_str = f"🚫 <b>БЕЗ НАВЕСА (только ворота)</b>\n🚗 <b>ВОРОТА: {price_gate:,} руб.</b>\n💵 <b>ИТОГО: {price_gate:,} руб.</b>"
@@ -337,22 +367,7 @@ def format_order_message(order, user_name, user_link, phone, comment, status_cod
         f"➖➖➖➖➖➖➖➖➖➖\n"
         f"{user_info if for_admin else ''}"
         f"🆔 <b>ID:</b> <code>{order.get('id')}</code>\n"
-        f"🏗 <b>Тип:</b> {rtype}\n"
-        f"📏 <b>Длина:</b> {order.get('length')} м\n"
-        f"📏 <b>Ширина:</b> {order.get('width')} м\n"
-        f"↕️ <b>Высота (столб):</b> {order.get('height')} м\n"
-        f"🏔 <b>Высота (общ):</b> ~{order.get('height_peak')} м\n"
-        f"📐 <b>Уклон:</b> {order.get('slope')}°\n"
-        f"🧱 <b>Сечение:</b> {order.get('pillar')}\n"
-        f"➖➖➖➖➖➖➖➖➖➖\n"
-        f"🔲 <b>S пола:</b> {order.get('area_floor')} м²\n"
-        f"🏠 <b>S кровли:</b> {order.get('area_roof')} м²\n"
-        f"🏠 <b>Материал:</b> {mat}\n"
-        f"🎨 <b>Покраска:</b> {paint}\n"
-        f"🖌 <b>Цвет:</b> {order.get('color_frame')} / {order.get('color_roof')}\n"
-        f"➖➖➖➖➖➖➖➖➖➖\n"
-        f"🛠 <b>Опции:</b>\n{opt_str}\n"
-        f"{loads_str}"
+        f"{carport_str}"
         f"{gate_str}"
         f"➖➖➖➖➖➖➖➖➖➖\n"
         f"{price_str}"
