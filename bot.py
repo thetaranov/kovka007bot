@@ -6,6 +6,8 @@ import csv
 import asyncio
 import signal
 import sys
+import base64
+import time
 from datetime import datetime
 from aiohttp import web
 
@@ -38,6 +40,54 @@ if not BOT_TOKEN:
     sys.exit(1)
 
 logger.info(f"🚀 Запуск бота на порту: {PORT}")
+
+# === ХРАНИЛИЩЕ СКРИНШОТОВ (в памяти, TTL 5 минут) ===
+_screenshot_store: dict[str, tuple[str, float]] = {}  # order_id -> (base64_data, timestamp)
+
+def store_screenshot(order_id: str, base64_data: str):
+    """Сохранить скриншот для заказа"""
+    _screenshot_store[order_id] = (base64_data, time.time())
+    # Очистка старых (>5 мин)
+    cutoff = time.time() - 300
+    expired = [k for k, v in _screenshot_store.items() if v[1] < cutoff]
+    for k in expired:
+        del _screenshot_store[k]
+
+def get_screenshot(order_id: str) -> str | None:
+    """Получить скриншот для заказа"""
+    entry = _screenshot_store.pop(order_id, None)
+    if entry and (time.time() - entry[1]) < 300:
+        return entry[0]
+    return None
+
+def decode_screenshot(base64_data: str) -> bytes | None:
+    """Декодировать base64 скриншот в bytes"""
+    try:
+        # Удаляем data:image/jpeg;base64, если есть
+        if ',' in base64_data:
+            base64_data = base64_data.split(',', 1)[1]
+        return base64.b64decode(base64_data)
+    except Exception as e:
+        logger.error(f"Failed to decode screenshot: {e}")
+        return None
+
+async def send_order_with_photo(bot, chat_id: str | int, msg: str, screenshot_b64: str | None):
+    """Отправить заказ с фото или без"""
+    photo_bytes = decode_screenshot(screenshot_b64) if screenshot_b64 else None
+    if photo_bytes:
+        try:
+            photo_io = io.BytesIO(photo_bytes)
+            photo_io.name = 'scene.jpg'
+            await bot.send_photo(chat_id=chat_id, photo=photo_io, caption=msg[:1024], parse_mode=ParseMode.HTML)
+            # Если сообщение длиннее 1024 символов — дошлём текстом
+            if len(msg) > 1024:
+                await bot.send_message(chat_id=chat_id, text=msg, parse_mode=ParseMode.HTML)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send photo to {chat_id}: {e}")
+    # Fallback: отправляем только текст
+    await bot.send_message(chat_id=chat_id, text=msg, parse_mode=ParseMode.HTML)
+    return False
 
 # === СПРАВОЧНИКИ ===
 ROOF_TYPES = {'single': 'Односкатный', 'gable': 'Двускатный', 'arched': 'Арочный', 'triangular': 'Треугольный', 'semiarched': 'Полуарочный'}
@@ -89,6 +139,7 @@ async def start_http_server(port, application=None):
         return web.Response(status=403, text='Forbidden')
 
     app.router.add_options('/submit_order', handle_options)
+    app.router.add_options('/upload_screenshot', handle_options)
 
     async def handle_submit_order(request):
         try:
@@ -102,6 +153,12 @@ async def start_http_server(port, application=None):
 
             data = await request.json()
             logger.info(f"📨 Received browser order via HTTP endpoint: id={data.get('id')}")
+
+            # Извлекаем скриншот из payload (если есть)
+            screenshot_b64 = data.pop('screenshot', None)
+            # Также проверяем хранилище скриншотов (для Telegram WebApp заказов)
+            if not screenshot_b64 and data.get('id'):
+                screenshot_b64 = get_screenshot(data['id'])
 
             # Extract contact fields if provided
             customer_name = data.get('name') or data.get('customer') or 'Браузерный пользователь'
@@ -118,17 +175,15 @@ async def start_http_server(port, application=None):
                 logger.error(f"Error formatting order message: {e}")
                 msg = f"🌐 <b>ЗАЯВКА ИЗ БРАУЗЕРА</b>\n\nНовая заявка (не удалось распарсить):\n{json.dumps(data, ensure_ascii=False)[:400]}"
 
-            # Send to admin channel AND admin user
+            # Send to admin channel AND admin user (с фото если есть)
             if application and application.bot:
                 try:
-                    # Отправляем в админ канал
-                    await application.bot.send_message(chat_id=ADMIN_CHANNEL_ID, text=msg, parse_mode=ParseMode.HTML)
+                    await send_order_with_photo(application.bot, ADMIN_CHANNEL_ID, msg, screenshot_b64)
                     logger.info(f"✅ Sent browser order to admin channel {ADMIN_CHANNEL_ID}")
                 except Exception as e:
                     logger.error(f"Failed to send order to admin channel: {e}")
-                    # Fallback: отправляем лично админу
                     try:
-                        await application.bot.send_message(chat_id=ADMIN_USER_ID, text=msg, parse_mode=ParseMode.HTML)
+                        await send_order_with_photo(application.bot, ADMIN_USER_ID, msg, screenshot_b64)
                         logger.info(f"✅ Sent browser order to admin user {ADMIN_USER_ID} (fallback)")
                     except Exception as e2:
                         logger.error(f"Failed to send order to admin user: {e2}")
@@ -141,6 +196,32 @@ async def start_http_server(port, application=None):
             return web.json_response({'ok': False, 'error': str(e)}, status=500, headers=cors_headers(request.headers.get('origin', '')))
 
     app.router.add_post('/submit_order', handle_submit_order)
+
+    async def handle_upload_screenshot(request):
+        """Принимает скриншот 3D сцены для прикрепления к заказу (из Telegram WebApp)"""
+        try:
+            origin = request.headers.get('origin', '')
+            allowed_list = [o.strip() for o in get_allowed_origins().split(',') if o.strip()]
+            headers = cors_headers(origin) if (not origin or origin in allowed_list) else {}
+            
+            if origin and origin not in allowed_list:
+                return web.Response(status=403, text='Forbidden', headers=headers)
+
+            data = await request.json()
+            order_id = data.get('order_id')
+            screenshot = data.get('screenshot')
+            
+            if order_id and screenshot:
+                store_screenshot(order_id, screenshot)
+                logger.info(f"📸 Screenshot stored for order {order_id} ({len(screenshot)} chars)")
+                return web.json_response({'ok': True}, headers=headers)
+            else:
+                return web.json_response({'ok': False, 'error': 'Missing order_id or screenshot'}, status=400, headers=headers)
+        except Exception as e:
+            logger.error(f"Exception in upload_screenshot: {e}", exc_info=True)
+            return web.json_response({'ok': False, 'error': str(e)}, status=500, headers=cors_headers(request.headers.get('origin', '')))
+
+    app.router.add_post('/upload_screenshot', handle_upload_screenshot)
 
     runner = web.AppRunner(app)
     await runner.setup()
@@ -241,11 +322,15 @@ def format_order_message(order, user_name, user_link, phone, comment, status_cod
     price_navyes = order.get('price', 0)
     price_gate = order.get('price_gate', 0)
     price_total = order.get('price_total', price_navyes + price_gate)
+    only_gates = order.get('only_gates', False)
     
-    price_str = f"💰 <b>НАВЕС: {price_navyes:,} руб.</b>"
-    if price_gate > 0:
-        price_str += f"\n🚗 <b>ВОРОТА: {price_gate:,} руб.</b>"
-        price_str += f"\n💵 <b>ИТОГО: {price_total:,} руб.</b>"
+    if only_gates:
+        price_str = f"🚫 <b>БЕЗ НАВЕСА (только ворота)</b>\n🚗 <b>ВОРОТА: {price_gate:,} руб.</b>\n💵 <b>ИТОГО: {price_gate:,} руб.</b>"
+    else:
+        price_str = f"💰 <b>НАВЕС: {price_navyes:,} руб.</b>"
+        if price_gate > 0:
+            price_str += f"\n🚗 <b>ВОРОТА: {price_gate:,} руб.</b>"
+            price_str += f"\n💵 <b>ИТОГО: {price_total:,} руб.</b>"
 
     return (
         f"{header}\n"
@@ -647,10 +732,18 @@ async def handle_webapp_data(update: Update, context: ContextTypes.DEFAULT_TYPE)
         if 'user_comment' not in context.user_data: 
             context.user_data['user_comment'] = 'Нет пожеланий'
 
-        await update.message.reply_text(
-            format_order_message(data, update.effective_user.first_name, "", "", "", 1, for_admin=False),
-            parse_mode=ParseMode.HTML
-        )
+        # Проверяем наличие скриншота в хранилище (загружен заранее через /upload_screenshot)
+        screenshot_b64 = get_screenshot(data.get('id', '')) if data.get('id') else None
+        if screenshot_b64:
+            context.user_data['order_screenshot'] = screenshot_b64
+            logger.info(f"📸 Screenshot found for order {data.get('id')}")
+
+        # Отправляем пользователю заказ с фото (если есть скриншот)
+        order_msg = format_order_message(data, update.effective_user.first_name, "", "", "", 1, for_admin=False)
+        if screenshot_b64:
+            await send_order_with_photo(context.bot, update.effective_chat.id, order_msg, screenshot_b64)
+        else:
+            await update.message.reply_text(order_msg, parse_mode=ParseMode.HTML)
 
         await update.message.reply_text(
             "✅ <b>Проект создан успешно!</b>\n\n"
@@ -715,23 +808,17 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_link = f"@{user.username}" if user.username else "Нет"
     report = format_order_message(order, user.first_name, user_link, phone, comment, 1, for_admin=True)
 
+    # Скриншот 3D сцены (если был загружен ранее через WebApp)
+    order_screenshot = context.user_data.get('order_screenshot')
+
     try:
         if photos:
             # Отправляем фото отдельным постом
             media = [InputMediaPhoto(media=pid) for pid in photos]
             await context.bot.send_media_group(chat_id=ADMIN_CHANNEL_ID, media=media)
-            # Отправляем текст заявки
-            await context.bot.send_message(
-                chat_id=ADMIN_CHANNEL_ID, 
-                text=report,
-                parse_mode=ParseMode.HTML
-            )
-        else:
-            await context.bot.send_message(
-                chat_id=ADMIN_CHANNEL_ID, 
-                text=report,
-                parse_mode=ParseMode.HTML
-            )
+
+        # Отправляем заявку со скриншотом 3D сцены (или только текстом)
+        await send_order_with_photo(context.bot, ADMIN_CHANNEL_ID, report, order_screenshot)
     except Exception as e: 
         logger.error(f"Ошибка отправки в канал: {e}")
 
